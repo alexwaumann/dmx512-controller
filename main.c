@@ -2,6 +2,8 @@
 
 #include <stdint.h>
 
+int dmx512_phase = 0;
+
 void init_hw( void );
 
 void init_uart_coms( uint32_t sys_clock, uint32_t baud_rate );
@@ -16,6 +18,7 @@ int main(void)
 
 void init_hw( void )
 {
+    //set PC6 as digital output
 }
 
 void init_uart_coms( uint32_t sys_clock, uint32_t baud_rate )
@@ -33,6 +36,7 @@ void init_uart_coms( uint32_t sys_clock, uint32_t baud_rate )
     uint8_t  brf  = (int) ((brd - (float) bri) * 64.0f + 0.5f);
              brf &= 0x3F;                       // only need bottom 6 bits
 
+    //UART0 :: for
     UART0_CTL_R  &= ~UART_CTL_UARTEN;           // disable UART0 for configuration
     UART0_IBRD_R |= bri;                        // baud rate divisor integer part
     UART0_FBRD_R |= brf;                        // baud rate divisor fractional part
@@ -40,10 +44,29 @@ void init_uart_coms( uint32_t sys_clock, uint32_t baud_rate )
     UART0_CC_R    = UART_CC_CS_SYSCLK;          // use system clock
     UART0_CTL_R  |= UART_CTL_UARTEN             // enable UART0 and TX
                  |  UART_CTL_TXE;
+
+    //TIMER1 :: for DMX-512 Break and MAB
+    SYSCTL_RCGCTIMER_R |= SYSCTL_RCGCTIMER_R1;  //turn on timer
+    TIMER1_CTL_R &= ~TIMER_CTL_TAEN;            //turn off timer before configuring
+    TIMER1_CFG_R = TIMER_CFG_32_BIT_TIMER;      //configure as 32-bit timer (concatenated)
+    TIMER1_TAMR_R = TIMER_TAMR_TAMR_1_SHOT;     //configure in one-shot mode (count down)
+    TIMER1_IMR_R = TIMER_IMR_TATOIM;            //turn on timer1 interrupt
+    NVIC_EN0_R |= 1 << (INT_TIMER1A - 16);      //turn on interrupt 37 (TIMER1A)
+    //TIMER1_CTL_R |= TIMER_CTL_TAEN;             //turn on timer
+       
 }
 
 void init_uart_dmx( void )
 {
     // setup UART1 using ports PC4-5
     // setup interrupts
+    TIMER1_TAILR_R = 5682;                      //set timer for 176 us
+    //drive pc6 to 0
+    TIMER1_CTL_R |= TIMER_CTL_TAEN;             //turn on timer
+
+}
+
+Timer1ISR(){
+
+
 }
