@@ -47,8 +47,7 @@ void dmx_prime(void)
 {
     //Break
     GPIO_PORTC_AFSEL_R  &= ~32;                 // clear 6th bit to disable peripheral control for PC5
-    //TODO set the timer1A ILR to a value for 176 us
-    TIMER1_TAILR_R = 0;                         // set Timer1A ILR to appropriate value for 176 us
+    TIMER1_TAILR_R = 7040;                      // set Timer1A ILR to appropriate value for 176 us
     DMX_DE = 1;                                 // drive DMX_DE high to enable transmission
     DMX_TX = 0;                                 // drive DMX_TX low
     TIMER1_CTL_R |= TIMER_CTL_TAEN;             // turn on timer 1
@@ -65,10 +64,7 @@ void init_uart_dmx( void )
     GPIO_PORTC_ODR_R    &= ~112;                // set PC5 and PC4 ODR to 0
 
     //UART1 :: for DMX-512 Transmission
-    //TODO set sysclock
-    uint32_t sys_clock = 0;
-    uint32_t baud_rate = 250000;
-    float    brd  = (float) sys_clock / (16.0f * (float) baud_rate);
+    float    brd  = (float) 40000000 / (16.0f * (float) 250000);
     uint16_t bri  = (int) brd;
     uint8_t  brf  = (int) ((brd - (float) bri) * 64.0f + 0.5f);
              brf &= 0x3F;                       // only need bottom 6 bits
@@ -97,11 +93,9 @@ void init_uart_dmx( void )
 }
 
 void Uart1ISR(void){
-    for(int i=0;i<14;i++)
-    {
+    for(int i=0;i<14;i++){
         UART1_DR_R = dmx512_data[(dmx512_state++) - 2];
-        if((dmx512_state - 2) >= dmx512_max )
-        {
+        if((dmx512_state - 2) >= dmx512_max ){
             dmx_prime();
             return;
         }
@@ -109,16 +103,14 @@ void Uart1ISR(void){
 }
 
 void Timer1ISR(void){
-    if(dmx512_state == 0)
-    {
+    if(dmx512_state == 0){
         //TODO set TAILR_R to value for 12 us
         dmx512_state = 1;                           // advance dmx512 state
-        TIMER1_TAILR_R = 0;                         // set Timer1A ILR to appropriate value for 12 us
+        TIMER1_TAILR_R = 480;                       // set Timer1A ILR to appropriate value for 12 us
         DMX_TX = 1;                                 // drive DMX_TX high
         TIMER1_CTL_R |= TIMER_CTL_TAEN;             // turn on timer 1
     }
-    else if(dmx512_state == 1)
-    {
+    else if(dmx512_state == 1){
         dmx512_state = 2;                           // advance dmx512 state
         GPIO_PORTC_AFSEL_R |= 32 | 16;              // set 5th and 6th bits to enable peripheral control for PC5 and PC4
         GPIO_PORTC_PCTL_R  |= GPIO_PCTL_PC5_U1TX    // UART1 TX ON PC5
