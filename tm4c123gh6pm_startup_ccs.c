@@ -33,6 +33,7 @@ void ResetISR(void);
 static void NmiSR(void);
 static void FaultISR(void);
 static void IntDefaultHandler(void);
+void Timer1ISR(void);
 
 //*****************************************************************************
 //
@@ -298,5 +299,3 @@ IntDefaultHandler(void)
     {
     }
 }
-
-void Timer1ISR(void);

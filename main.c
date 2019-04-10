@@ -1,6 +1,8 @@
-#include "tm4c123gh6pm"
+/*
+#include "tm4c123gh6pm.h"
 
 #include <stdint.h>
+#define DMX_TX (*((volatile uint32_t *)(0x42000000 + (0x400063FC-0x40000000)*32 + 5*4)))
 
 int dmx512_phase = 0;
 
@@ -13,12 +15,20 @@ int main(void)
 {
     init_hw();
 
-    while( 1 );
+    while( 1 ){
+
+
+    }
 }
 
 void init_hw( void )
 {
     //set PC6 as digital output
+    SYSCTL_RCGCGPIO_R  |= SYSCTL_RCGCGPIO_R2;   // enable PORTC module
+    GPIO_PORTC_DIR_R    |= 32;                  // set PC5 direction as output
+    GPIO_PORTC_DEN_R    |= 32 | 16;             // set PC5/DMX_TX and PC4 as digital I/O
+    GPIO_PORTC_ODR_R    &= ~48;                 // set PC5 and PC4 ODR to 0
+    DMX_TX = 1;
 }
 
 void init_uart_coms( uint32_t sys_clock, uint32_t baud_rate )
@@ -70,3 +80,4 @@ Timer1ISR(){
 
 
 }
+*/
