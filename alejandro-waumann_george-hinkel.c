@@ -2,6 +2,8 @@
 
 #include <stdint.h>
 
+int dmx512_state;
+
 void init_hw( void );
 
 void init_uart_coms( uint32_t sys_clock, uint32_t baud_rate );
@@ -44,6 +46,28 @@ void init_uart_coms( uint32_t sys_clock, uint32_t baud_rate )
 
 void init_uart_dmx( void )
 {
+    SYSCTL_RCGCGPIO_R |= SYSCTL_RCGCGPIO_R2;    // enable PORTC module
+    SYSCTL_RCGCUART_R |= SYSCTL_RCGCUART_R1;    // enable UART1 module
+    GPIO_PORTC_AFSEL_R |=
+
+    //TIMER1 :: for DMX-512 Break and MAB
+    SYSCTL_RCGCTIMER_R |= SYSCTL_RCGCTIMER_R1;  //turn on timer
+    TIMER1_CTL_R &= ~TIMER_CTL_TAEN;            //turn off timer before configuring
+    TIMER1_CFG_R = TIMER_CFG_32_BIT_TIMER;      //configure as 32-bit timer (concatenated)
+    TIMER1_TAMR_R = TIMER_TAMR_TAMR_1_SHOT;     //configure in one-shot mode (count down)
+    TIMER1_IMR_R = TIMER_IMR_TATOIM;            //turn on timer1 interrupt
+    NVIC_EN0_R |= 1 << (INT_TIMER1A - 16);      //turn on interrupt 37 (TIMER1A)
+    TIMER1_CTL_R |= TIMER_CTL_TAEN;             //turn on timer
+    dmx512_state = 0;
     // setup UART1 using ports PC4-5
     // setup interrupts
+}
+
+void Timer1ISR(void){
+    if(dmx512_state == 0){
+
+    }else if(dmx512_state == 1){
+
+    }
+
 }

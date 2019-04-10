@@ -298,3 +298,5 @@ IntDefaultHandler(void)
     {
     }
 }
+
+void Timer1ISR(void);
