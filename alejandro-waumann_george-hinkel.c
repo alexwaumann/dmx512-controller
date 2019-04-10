@@ -97,7 +97,7 @@ void init_uart_dmx( void )
 }
 
 void Uart1ISR(void){
-    for(int i=0;i<16;i++)
+    for(int i=0;i<14;i++)
     {
         UART1_DR_R = dmx512_data[(dmx512_state++) - 2];
         if((dmx512_state - 2) >= dmx512_max )
@@ -125,7 +125,7 @@ void Timer1ISR(void){
                            |  GPIO_PCTL_PC4_U1RX;   // UART1 RX on PC4
         UART1_CTL_R  |= UART_CTL_UARTEN             // enable UART1
                      |  UART_CTL_TXE;               // enable UART1 transmission
-        UART1_DR_R = dmx512_data[(dmx512_state++) - 2];
+        //UART1_DR_R = dmx512_data[(dmx512_state++) - 2]; //maybe the interrupt will occur any way
     }
 }
 
