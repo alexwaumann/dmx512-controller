@@ -49,22 +49,28 @@ void init_uart_coms( uint32_t sys_clock, uint32_t baud_rate )
 
 void init_uart_dmx( void )
 {
+    //TODO
+    /**
+     * Set the sys_clock variable or replace in code with hard value
+     * set the timer1A ILR to a value for 176 us
+     */
     dmx512_state = 0;
-    uint32_t sys_clock = 0;
-    uint32_t baud_rate = 250000;
 
+    //GPIO PORTC :: for DMX-512
     SYSCTL_RCGCGPIO_R  |= SYSCTL_RCGCGPIO_R2;   // enable PORTC module
-    SYSCTL_RCGCUART_R  |= SYSCTL_RCGCUART_R1;   // enable UART1 module
     GPIO_PORTC_DIR_R    |= 32;                  // set PC5 direction as output
     GPIO_PORTC_DEN_R    |= 32 | 16;             // set PC5/DMX_TX and PC4 as digital I/O
     GPIO_PORTC_ODR_R    &= ~48;                 // set PC5 and PC4 ODR to 0
 
     //UART1 :: for DMX-512 Transmission
+    uint32_t sys_clock = 0;
+    uint32_t baud_rate = 250000;
     float    brd  = (float) sys_clock / (16.0f * (float) baud_rate);
     uint16_t bri  = (int) brd;
     uint8_t  brf  = (int) ((brd - (float) bri) * 64.0f + 0.5f);
              brf &= 0x3F;                       // only need bottom 6 bits
 
+    SYSCTL_RCGCUART_R  |= SYSCTL_RCGCUART_R1;   // enable UART1 module
     UART1_CTL_R  &= ~UART_CTL_UARTEN;           // disable UART1 for configuration
     UART1_IBRD_R |= bri;                        // baud rate divisor integer part
     UART1_FBRD_R |= brf;                        // baud rate divisor fractional part
@@ -82,17 +88,15 @@ void init_uart_dmx( void )
 
     //Break
     GPIO_PORTC_AFSEL_R  &= ~32;                 // clear 6th bit to disable peripheral control for PC5
+    TIMER1_TAILR_R = 0;                         // set Timer1A ILR to appropriate value for 176 us
+    DMX_TX = 0;                                 // drive DMX_TX low
+    TIMER1_CTL_R |= TIMER_CTL_TAEN;             //turn on timer 1
 
-    DMX_TX               = 0;                   // drive DMX_TX low
-    TIMER1_CTL_R        |= TIMER_CTL_TAEN;      //turn on timer
-
-    // setup UART1 using ports PC4-5
-    // setup interrupts
 }
 
 void Timer1ISR(void){
     if(dmx512_state == 0){
-
+        TIMER1_TAILR_R = 0;                     // set Timer1A ILR to appropriate value for 12 us
     }else if(dmx512_state == 1){
         GPIO_PORTC_AFSEL_R |= 32 | 16;              // set 5th and 6th bits to enable peripheral control for PC5 and PC4
         GPIO_PORTC_PCTL_R  |= GPIO_PCTL_PC5_U1TX    // UART1 TX ON PC5
