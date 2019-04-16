@@ -1,6 +1,7 @@
 #include "tm4c123gh6pm.h"
 
 #include <stdint.h>
+#include <string.h>
 
 #define PC5_MASK 32
 #define DMX_TX (*((volatile uint32_t *)(0x42000000 + (0x400063FC-0x40000000)*32 + 5*4)))
@@ -9,6 +10,7 @@
 int dmx512_state;
 int dmx512_max = 512;
 char dmx512_data[513];
+char coms_cmd[128];
 
 void init_hw( void );
 
@@ -27,7 +29,8 @@ void init_uart_coms( uint32_t sys_clock, uint32_t baud_rate )
     SYSCTL_RCGCGPIO_R |= SYSCTL_RCGCGPIO_R0;    // enable PORTA module
     GPIO_PORTA_AFSEL_R |= 2;                    // enable peripheral control for PA1 (TX)
                                                 // default: 2ma drive
-    GPIO_PORTA_PCTL_R |= GPIO_PCTL_PA1_U0TX;    // UART TX on PA1
+    GPIO_PORTA_PCTL_R |= GPIO_PCTL_PA1_U0TX    // UART TX on PA1
+                      |  GPIO_PCTL_PA0_U0RX;
 
     float    brd  = (float) sys_clock / (16.0f * (float) baud_rate);
     uint16_t bri  = (int) brd;
@@ -40,7 +43,8 @@ void init_uart_coms( uint32_t sys_clock, uint32_t baud_rate )
     UART0_LCRH_R |= UART_LCRH_WLEN_8;           // 8-bit data frame
     UART0_CC_R    = UART_CC_CS_SYSCLK;          // use system clock
     UART0_CTL_R  |= UART_CTL_UARTEN             // enable UART0 and TX
-                 |  UART_CTL_TXE;
+                 |  UART_CTL_TXE
+                 |  UART_CTL_RXE;
 }
 
 void dmx_prime(void)
@@ -93,7 +97,8 @@ void init_uart_dmx( void )
 }
 
 void Uart1ISR(void){
-    for(int i=0;i<14;i++){
+    int i;
+    for(i=0;i<14;i++){
         UART1_DR_R = dmx512_data[(dmx512_state++) - 2];
         if((dmx512_state - 2) >= dmx512_max ){
             dmx_prime();
@@ -121,9 +126,43 @@ void Timer1ISR(void){
     }
 }
 
+// Blocking function that writes a serial character when the UART buffer is not full
+void putcUart0(char c)
+{
+    while (UART0_FR_R & UART_FR_TXFF);
+    UART0_DR_R = c;
+}
+
+// Blocking function that writes a string when the UART buffer is not full
+void putsUart0(char* str)
+{
+    int i;
+    for (i = 0; i < strlen(str); i++)
+      putcUart0(str[i]);
+}
+
+int parse(char cmd[128])
+{
+    putsUart0(cmd);
+    return 0;
+}
+
 int main(void)
 {
     init_hw();
-
-    while( 1 );
+    //init_uart_dmx();
+    init_uart_coms(40000000,9600);
+    unsigned char coms_index = 0;
+    while( 1 ){
+        /*
+        char c = UART0_DR_R & 0xFF;
+        if(c){
+            coms_cmd[coms_index++] = c;
+            if(c == '\r'){
+                parse(coms_cmd);
+                coms_index = 0;
+            }
+        }*/
+        putsUart0("test\n\r");
+    }
 }
