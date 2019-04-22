@@ -8,7 +8,7 @@
 #define DMX_TX (*((volatile uint32_t *)(0x42000000 + (0x400063FC-0x40000000)*32 + 5*4)))
 #define DMX_DE (*((volatile uint32_t *)(0x42000000 + (0x400063FC-0x40000000)*32 + 6*4)))
 
-int dmx512_state;
+short dmx512_state;
 int dmx512_max = 512;
 char dmx512_data[513];
 char coms_cmd[128];
