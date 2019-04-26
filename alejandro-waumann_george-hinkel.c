@@ -8,13 +8,14 @@
 #define DMX_TX (*((volatile uint32_t *)(0x42000000 + (0x400063FC-0x40000000)*32 + 5*4)))
 #define DMX_DE (*((volatile uint32_t *)(0x42000000 + (0x400063FC-0x40000000)*32 + 6*4)))
 
-char controller_device_state = 'd';
-unsigned int dmx512_state = 0;
-unsigned int dmx512_rx_index = 0;
-unsigned int dmx512_rx_address = 0;
-unsigned char dmx512_rx_current_data = 0;
-unsigned char dmx512_rx_data[513];
-unsigned int dmx512_max = 512;
+//general globals
+char MODE = 'c';                            //tracks whether in controller or device mode
+unsigned int dmx512_state = 0;              //global to control state of DMX512 Transmission algorithm
+unsigned int dmx512_rx_index = 0;           //global to track index of DMX512 receive buffer
+unsigned int dmx512_rx_address = 0;         //global to store device mode listening address
+unsigned char dmx512_rx_data = 0;           //global to store device mode data received at listening address
+unsigned char dmx512_rx_buffer[513];        //global buffer to store all device mode received data
+unsigned int dmx512_max = 512;              //global to store controller mode
 unsigned char dmx512_data[513];
 char coms_cmd[128];
 unsigned char coms_index = 0;
@@ -37,8 +38,10 @@ void init_hw( void )
     SYSCTL_RCGC2_R = SYSCTL_RCGC2_GPIOA | SYSCTL_RCGC2_GPIOC;
 
     init_uart_coms(40000000,115200);
+    init_uart_dmx();
 }
 
+//function that configures UART for virtual COMS port
 void init_uart_coms( uint32_t sys_clock, uint32_t baud_rate )
 {
     // setup UART0 for COMS PORT
@@ -64,17 +67,7 @@ void init_uart_coms( uint32_t sys_clock, uint32_t baud_rate )
 
 }
 
-void dmx_prime(void)
-{
-    //Break
-    dmx512_state = 0;
-    GPIO_PORTC_AFSEL_R  &= ~32;                 // clear 6th bit to disable peripheral control for PC5
-    TIMER1_TAILR_R = 7040;                      // set Timer1A ILR to appropriate value for 176 us
-    DMX_DE = 0;                                 // drive DMX_DE low to enable transmission
-    DMX_TX = 0;                                 // drive DMX_TX low to create break condition
-    TIMER1_CTL_R |= TIMER_CTL_TAEN;             // turn on timer 1
-}
-
+//function that configures the UART, GPIO, and TIMER for DMX512
 void init_uart_dmx( void )
 {
     //GPIO PORTC :: for DMX-512
@@ -83,7 +76,7 @@ void init_uart_dmx( void )
     GPIO_PORTC_DEN_R    |= 64 | 32 | 16;        // set PC5/DMX_TX and PC4 as digital I/O
     GPIO_PORTC_ODR_R    &= ~112;                // set PC5 and PC4 ODR to 0
 
-    //UART1 :: for DMX-512 Transmission
+    //UART1 :: for DMX-512
     float    brd  = (float) 40000000 / (16.0f * (float) 250000);
     uint16_t bri  = (int) brd;
     uint8_t  brf  = (int) ((brd - (float) bri) * 64.0f + 0.5f);
@@ -110,6 +103,19 @@ void init_uart_dmx( void )
     NVIC_EN0_R |= 1 << (INT_TIMER1A - 16);      // turn on interrupt 37 (TIMER1A)
 }
 
+//function that "primes the pump" for dmx transmission
+void dmx_prime(void)
+{
+    //Break
+    dmx512_state = 0;
+    GPIO_PORTC_AFSEL_R  &= ~32;                 // clear 6th bit to disable peripheral control for PC5
+    TIMER1_TAILR_R = 7040;                      // set Timer1A ILR to appropriate value for 176 us
+    DMX_DE = 0;                                 // drive DMX_DE low to enable transmission
+    DMX_TX = 0;                                 // drive DMX_TX low to create break condition
+    TIMER1_CTL_R |= TIMER_CTL_TAEN;             // turn on timer 1
+}
+
+//function that starts transmitting dmx data
 void init_dmx_tx(void)
 {
     UART1_IM_R |= UART_IM_TXIM;                 //enable the TX interrupt mask to keep the tx buffer full
@@ -118,6 +124,7 @@ void init_dmx_tx(void)
     dmx_prime();
 }
 
+//function that starts receiving dmx data
 void init_dmx_rx(void)
 {
     UART1_IM_R |= UART_IM_RXIM                  //enable the RX interrupt mask to keep the RX buffer not full
@@ -126,6 +133,7 @@ void init_dmx_rx(void)
     DMX_DE = 1;                                 //drive DMX_DE high to disable transmission
 }
 
+//UART1 interrupt service routine, manages TX and RX fifos as well as break conditions in device mode
 void Uart1ISR(void)
 {
     //TX INTERRUPT -> fill TX fifo
@@ -137,12 +145,12 @@ void Uart1ISR(void)
             if((dmx512_state - 2) >= dmx512_max )
             {
                 while(UART1_FR_R & UART_FR_BUSY);//wait until transmission completes
-                dmx_prime();
                 UART1_ICR_R |= UART_ICR_TXIC;   // clear the TX interrupt
+                dmx_prime();
                 return;
             }
         }
-        UART1_ICR_R |= UART_ICR_TXIC;   // clear the TX interrupt flags
+        UART1_ICR_R |= UART_ICR_TXIC;   // clear the TX interrupt flag
     }
 
     //RX INTERRUPT -> empty RX fifo
@@ -150,9 +158,9 @@ void Uart1ISR(void)
     {
         while(!(UART1_FR_R & UART_FR_RXFE))//while RX fifo not empty
         {
-            dmx512_rx_data[dmx512_rx_index++] = UART1_DR_R & 0xFF;
+            dmx512_rx_buffer[dmx512_rx_index++] = UART1_DR_R & 0xFF;
         }
-        UART1_ICR_R |= UART_ICR_RXIC;   // clear the RX interrupt flags
+        UART1_ICR_R |= UART_ICR_RXIC;   // clear the RX interrupt flag
     }
 
     //BE INTERRUPT -> empty RX fifo and clear receive buffer
@@ -160,14 +168,15 @@ void Uart1ISR(void)
     {
         while(!(UART1_FR_R & UART_FR_RXFE))//while RX fifo not empty
         {
-            dmx512_rx_data[dmx512_rx_index++] = UART1_DR_R & 0xFF;
+            dmx512_rx_buffer[dmx512_rx_index++] = UART1_DR_R & 0xFF;
         }
         dmx512_rx_index = 0;
-        dmx512_rx_current_data = dmx512_rx_data[dmx512_rx_address];
-        UART1_ICR_R |= UART_ICR_BEIC;   // clear the BE interrupt flags
+        dmx512_rx_data = dmx512_rx_buffer[dmx512_rx_address];
+        UART1_ICR_R |= UART_ICR_BEIC;   // clear the BE interrupt flag
     }
 }
 
+//TIMER1 interrupt service routine, handles priming the pump and starting uart for DMX transmission
 void Timer1ISR(void)
 {
     if(dmx512_state == 0)
@@ -220,6 +229,11 @@ int parse(char cmd[128])
 int main(void)
 {
     init_hw();
+
+    if(MODE == 'c')
+        init_dmx_tx();
+    else if(MODE == 'd')
+        init_dmx_rx();
 
     while( 1 )
     {
