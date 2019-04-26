@@ -35,6 +35,7 @@ void init_hw( void );
 
 void init_uart_coms( uint32_t sys_clock, uint32_t baud_rate );
 void init_uart_dmx( void );
+void init_eeprom( void );
 
 void init_hw( void )
 {
@@ -50,6 +51,7 @@ void init_hw( void )
 
     init_uart_coms(40000000,115200);
     init_uart_dmx();
+    init_eeprom();
 }
 
 //function that configures UART for virtual COMS port
@@ -112,6 +114,24 @@ void init_uart_dmx( void )
     TIMER1_TAMR_R = TIMER_TAMR_TAMR_1_SHOT;     // configure in one-shot mode (count down)
     TIMER1_IMR_R = TIMER_IMR_TATOIM;            // turn on timer1 interrupt
     NVIC_EN0_R |= 1 << (INT_TIMER1A - 16);      // turn on interrupt 37 (TIMER1A)
+}
+
+void init_eeprom(void)
+{
+    SYSCTL_RCGCEEPROM_R |= SYSCTL_RCGCEEPROM_R0;
+    int i;
+    for(i=0;i<6;i++)
+        __asm("NOP");
+    while(EEPROM_EEDONE_R & EEPROM_EEDONE_WORKING);
+    if((EEPROM_EESUPP_R & EEPROM_EESUPP_PRETRY) || (EEPROM_EESUPP_R & EEPROM_EESUPP_ERETRY))
+        break; //error
+    SYSCTL_SREEPROM_R |= SYSCTL_SREEPROM_R0;
+    while(!(SYSCTL_PREEPROM_R & SYSCTL_PREEPROM_R0));
+    for(i=0;i<6;i++)
+       __asm("NOP");
+    while(EEPROM_EEDONE_R & EEPROM_EEDONE_WORKING);
+    if((EEPROM_EESUPP_R & EEPROM_EESUPP_PRETRY) || (EEPROM_EESUPP_R & EEPROM_EESUPP_ERETRY))
+        break; //error
 }
 
 //function that "primes the pump" for dmx transmission
@@ -242,33 +262,33 @@ int parse(char cmd[128])
 //function that loads MODE and ADDR vars from EEPROM if they were saved
 void recover_from_reset(void)
 {
-    EEPROM_EEBLOCK_M = EEPROM_STAT_BLOCK;
-    EEPROM_EEOFFSET_M = EEPROM_STAT_WORD;
-    EEPROM_STAT = EEPROM_EERDWR_M;
+    EEPROM_EEBLOCK_R = EEPROM_STAT_BLOCK;
+    EEPROM_EEOFFSET_R = EEPROM_STAT_WORD;
+    EEPROM_STAT = EEPROM_EERDWR_R;
     if(EEPROM_STAT)
     {
-        EEPROM_EEBLOCK_M = MODE_EEPROM_BLOCK;
-        EEPROM_EEOFFSET_M = MODE_EEPROM_WORD;
-        MODE = EEPROM_EERDWR_M & 0xFF;
-        EEPROM_EEBLOCK_M = ADDR_EEPROM_BLOCK;
-        EEPROM_EEOFFSET_M = ADDR_EEPROM_WORD;
-        ADDR = EEPROM_EERDWR_M;
+        EEPROM_EEBLOCK_R = MODE_EEPROM_BLOCK;
+        EEPROM_EEOFFSET_R = MODE_EEPROM_WORD;
+        MODE = EEPROM_EERDWR_R & 0xFF;
+        EEPROM_EEBLOCK_R = ADDR_EEPROM_BLOCK;
+        EEPROM_EEOFFSET_R = ADDR_EEPROM_WORD;
+        ADDR = EEPROM_EERDWR_R;
     }
 }
 
 //function that saves MODE and ADDR to EEPROM and sets the EEPROM_STAT flag and saves it too
 void save_mode_and_addr(void)
 {
-    EEPROM_EEBLOCK_M = MODE_EEPROM_BLOCK;
-    EEPROM_EEOFFSET_M = MODE_EEPROM_WORD;
-    EEPROM_EERDWR_M = MODE;
-    EEPROM_EEBLOCK_M = ADDR_EEPROM_BLOCK;
-    EEPROM_EEOFFSET_M = ADDR_EEPROM_WORD;
-    EEPROM_EERDWR_M = ADDR;
+    EEPROM_EEBLOCK_R = MODE_EEPROM_BLOCK;
+    EEPROM_EEOFFSET_R = MODE_EEPROM_WORD;
+    EEPROM_EERDWR_R = MODE;
+    EEPROM_EEBLOCK_R = ADDR_EEPROM_BLOCK;
+    EEPROM_EEOFFSET_R = ADDR_EEPROM_WORD;
+    EEPROM_EERDWR_R = ADDR;
     EEPROM_STAT = 1;
-    EEPROM_EEBLOCK_M = EEPROM_STAT_BLOCK;
-    EEPROM_EEOFFSET_M = EEPROM_STAT_WORD;
-    EEPROM_EERDWR_M = EEPROM_STAT;
+    EEPROM_EEBLOCK_R = EEPROM_STAT_BLOCK;
+    EEPROM_EEOFFSET_R = EEPROM_STAT_WORD;
+    EEPROM_EERDWR_R = EEPROM_STAT;
 }
 
 int main(void)
