@@ -8,10 +8,16 @@
 #define DMX_TX (*((volatile uint32_t *)(0x42000000 + (0x400063FC-0x40000000)*32 + 5*4)))
 #define DMX_DE (*((volatile uint32_t *)(0x42000000 + (0x400063FC-0x40000000)*32 + 6*4)))
 
-short dmx512_state;
-int dmx512_max = 512;
-char dmx512_data[513];
+char controller_device_state = 'd';
+unsigned int dmx512_state = 0;
+unsigned int dmx512_rx_index = 0;
+unsigned int dmx512_rx_address = 0;
+unsigned char dmx512_rx_current_data = 0;
+unsigned char dmx512_rx_data[513];
+unsigned int dmx512_max = 512;
+unsigned char dmx512_data[513];
 char coms_cmd[128];
+unsigned char coms_index = 0;
 
 void init_hw( void );
 
@@ -61,17 +67,16 @@ void init_uart_coms( uint32_t sys_clock, uint32_t baud_rate )
 void dmx_prime(void)
 {
     //Break
+    dmx512_state = 0;
     GPIO_PORTC_AFSEL_R  &= ~32;                 // clear 6th bit to disable peripheral control for PC5
     TIMER1_TAILR_R = 7040;                      // set Timer1A ILR to appropriate value for 176 us
-    DMX_DE = 1;                                 // drive DMX_DE high to enable transmission
-    DMX_TX = 0;                                 // drive DMX_TX low
+    DMX_DE = 0;                                 // drive DMX_DE low to enable transmission
+    DMX_TX = 0;                                 // drive DMX_TX low to create break condition
     TIMER1_CTL_R |= TIMER_CTL_TAEN;             // turn on timer 1
 }
 
 void init_uart_dmx( void )
 {
-    dmx512_state = 0;
-
     //GPIO PORTC :: for DMX-512
     SYSCTL_RCGCGPIO_R  |= SYSCTL_RCGCGPIO_R2;   // enable PORTC module
     GPIO_PORTC_DIR_R    |= 64 | 32;             // set PC5 direction as output
@@ -92,7 +97,8 @@ void init_uart_dmx( void )
                  |  UART_LCRH_STP2              // 2 stop-bits
                  |  UART_LCRH_FEN;              // enable transmit and receive FIFOs
     UART1_CC_R    = UART_CC_CS_SYSCLK;          // use system clock
-    UART1_IFLS_R |= UART_IFLS_TX1_8;            // set transmit interrupt to go off when transmit FIFO is 1/8th full
+    UART1_IFLS_R |= UART_IFLS_TX1_8             // set TX interrupt to go off when TX FIFO is 1/8th full
+                 |  UART_IFLS_RX7_8;            // set RX interrupt to go off when RX FIFO is 7/8th full
     NVIC_EN0_R |= 1 << (INT_UART1 - 16);        // turn on interrupt 22 (UART1)
 
     //TIMER1 :: for DMX-512 Break and MAB
@@ -102,31 +108,77 @@ void init_uart_dmx( void )
     TIMER1_TAMR_R = TIMER_TAMR_TAMR_1_SHOT;     // configure in one-shot mode (count down)
     TIMER1_IMR_R = TIMER_IMR_TATOIM;            // turn on timer1 interrupt
     NVIC_EN0_R |= 1 << (INT_TIMER1A - 16);      // turn on interrupt 37 (TIMER1A)
+}
 
-    //Break
+void init_dmx_tx(void)
+{
+    UART1_IM_R |= UART_IM_TXIM;                 //enable the TX interrupt mask to keep the tx buffer full
+    UART1_IM_R &= ~UART_IM_RXIM                 //disable the RX interrupt mask for controller mode
+               &  ~UART_IM_BEIM;                //disable the Break Error interrupt mask for controller mode
     dmx_prime();
 }
 
-void Uart1ISR(void){
-    int i;
-    for(i=0;i<14;i++){
-        UART1_DR_R = dmx512_data[(dmx512_state++) - 2];
-        if((dmx512_state - 2) >= dmx512_max ){
-            dmx_prime();
-            return;
+void init_dmx_rx(void)
+{
+    UART1_IM_R |= UART_IM_RXIM                  //enable the RX interrupt mask to keep the RX buffer not full
+               |  UART_IM_BEIM;                 //enable the Break Error interrupt mask to see breaks
+    UART1_IM_R &= ~UART_IM_TXIM;                //disable the TX interrupt mask for Device mode
+    DMX_DE = 1;                                 //drive DMX_DE high to disable transmission
+}
+
+void Uart1ISR(void)
+{
+    //TX INTERRUPT -> fill TX fifo
+    if(UART1_MIS_R & UART_MIS_TXMIS)
+    {
+        while(!(UART1_FR_R & UART_FR_TXFF))//while TX fifo not full
+        {
+            UART1_DR_R = dmx512_data[(dmx512_state++) - 2];
+            if((dmx512_state - 2) >= dmx512_max )
+            {
+                while(UART1_FR_R & UART_FR_BUSY);//wait until transmission completes
+                dmx_prime();
+                UART1_ICR_R |= UART_ICR_TXIC;   // clear the TX interrupt
+                return;
+            }
         }
+        UART1_ICR_R |= UART_ICR_TXIC;   // clear the TX interrupt flags
+    }
+
+    //RX INTERRUPT -> empty RX fifo
+    else if(UART1_MIS_R & UART_MIS_RXMIS)
+    {
+        while(!(UART1_FR_R & UART_FR_RXFE))//while RX fifo not empty
+        {
+            dmx512_rx_data[dmx512_rx_index++] = UART1_DR_R & 0xFF;
+        }
+        UART1_ICR_R |= UART_ICR_RXIC;   // clear the RX interrupt flags
+    }
+
+    //BE INTERRUPT -> empty RX fifo and clear receive buffer
+    if(UART1_MIS_R & UART_MIS_BEMIS)
+    {
+        while(!(UART1_FR_R & UART_FR_RXFE))//while RX fifo not empty
+        {
+            dmx512_rx_data[dmx512_rx_index++] = UART1_DR_R & 0xFF;
+        }
+        dmx512_rx_index = 0;
+        dmx512_rx_current_data = dmx512_rx_data[dmx512_rx_address];
+        UART1_ICR_R |= UART_ICR_BEIC;   // clear the BE interrupt flags
     }
 }
 
-void Timer1ISR(void){
-    if(dmx512_state == 0){
-        //TODO set TAILR_R to value for 12 us
+void Timer1ISR(void)
+{
+    if(dmx512_state == 0)
+    {
         dmx512_state = 1;                           // advance dmx512 state
         TIMER1_TAILR_R = 480;                       // set Timer1A ILR to appropriate value for 12 us
         DMX_TX = 1;                                 // drive DMX_TX high
         TIMER1_CTL_R |= TIMER_CTL_TAEN;             // turn on timer 1
     }
-    else if(dmx512_state == 1){
+    else if(dmx512_state == 1)
+    {
         dmx512_state = 2;                           // advance dmx512 state
         GPIO_PORTC_AFSEL_R |= 32 | 16;              // set 5th and 6th bits to enable peripheral control for PC5 and PC4
         GPIO_PORTC_PCTL_R  |= GPIO_PCTL_PC5_U1TX    // UART1 TX ON PC5
@@ -135,6 +187,7 @@ void Timer1ISR(void){
                      |  UART_CTL_TXE;               // enable UART1 transmission
         //UART1_DR_R = dmx512_data[(dmx512_state++) - 2]; //maybe the interrupt will occur any way
     }
+    TIMER1_ICR_R |= TIMER_ICR_TATOCINT;
 }
 
 // Blocking function that writes a serial character when the UART buffer is not full
@@ -154,28 +207,29 @@ void putsUart0(char* str)
 
 int parse(char cmd[128])
 {
-    putsUart0(cmd);
+    int i = 0;
+    for(i=0;i<coms_index;i++){
+        switch(i){
+
+        }
+    }
+    coms_index = 0;
     return 0;
 }
 
 int main(void)
 {
     init_hw();
-    //init_uart_dmx();
-    unsigned char coms_index = 0;
-    putsUart0("test\n\r");
-    while( 1 ){
-        /*
+
+    while( 1 )
+    {
         char c = UART0_DR_R & 0xFF;
-        if(c){
+        if(c)
+        {
             coms_cmd[coms_index++] = c;
-            if(c == '\r'){
+            if(c == '\r')
                 parse(coms_cmd);
-                coms_index = 0;
-            }
         }
-        */
-        putsUart0("test\r\n");
     }
 }
 
