@@ -7,18 +7,29 @@
 #define PC5_MASK 32
 #define DMX_TX (*((volatile uint32_t *)(0x42000000 + (0x400063FC-0x40000000)*32 + 5*4)))
 #define DMX_DE (*((volatile uint32_t *)(0x42000000 + (0x400063FC-0x40000000)*32 + 6*4)))
+#define MODE_EEPROM_BLOCK 0
+#define MODE_EEPROM_WORD 0
+#define ADDR_EEPROM_BLOCK 1
+#define ADDR_EEPROM_WORD 0
+#define EEPROM_STAT_BLOCK 2
+#define EEPROM_STAT_WORD 0
 
 //general globals
 char MODE = 'c';                            //tracks whether in controller or device mode
+char coms_cmd[128];                         //buffer for virtual COMS port
+unsigned char coms_index = 0;               //index for virtual COMS port buffer
+unint32_t EEPROM_STAT = 0;              //if 0 EEPROM was never written, else the MODE and ADDR have been stored
+
+//controller mode globals
+unsigned char dmx512_data[513];             //stores values of DMX512 data to be transmitted
+unsigned int dmx512_max = 512;              //stores DMX max value
 unsigned int dmx512_state = 0;              //global to control state of DMX512 Transmission algorithm
-unsigned int dmx512_rx_index = 0;           //global to track index of DMX512 receive buffer
-unsigned int dmx512_rx_address = 0;         //global to store device mode listening address
-unsigned char dmx512_rx_data = 0;           //global to store device mode data received at listening address
-unsigned char dmx512_rx_buffer[513];        //global buffer to store all device mode received data
-unsigned int dmx512_max = 512;              //global to store controller mode
-unsigned char dmx512_data[513];
-char coms_cmd[128];
-unsigned char coms_index = 0;
+
+//device mode globals
+unsigned int dmx512_rx_index = 0;           //index of DMX512 receive buffer
+uint32_t ADDR = 0;                      //stores dmx listening address
+unsigned char dmx512_rx_data = 0;           //stores dmx data received at listening address
+unsigned char dmx512_rx_buffer[513];        //stores all received dmx data
 
 void init_hw( void );
 
@@ -134,7 +145,7 @@ void init_dmx_rx(void)
 }
 
 //UART1 interrupt service routine, manages TX and RX fifos as well as break conditions in device mode
-void Uart1ISR(void)
+void Uart1ISR(void) //TODO: add handling for UART error conditions
 {
     //TX INTERRUPT -> fill TX fifo
     if(UART1_MIS_R & UART_MIS_TXMIS)
@@ -171,7 +182,7 @@ void Uart1ISR(void)
             dmx512_rx_buffer[dmx512_rx_index++] = UART1_DR_R & 0xFF;
         }
         dmx512_rx_index = 0;
-        dmx512_rx_data = dmx512_rx_buffer[dmx512_rx_address];
+        dmx512_rx_data = dmx512_rx_buffer[ADDR];
         UART1_ICR_R |= UART_ICR_BEIC;   // clear the BE interrupt flag
     }
 }
@@ -226,13 +237,48 @@ int parse(char cmd[128])
     return 0;
 }
 
+//TODO: add init_eeprom function and put in init_hw
+
+//function that loads MODE and ADDR vars from EEPROM if they were saved
+void recover_from_reset(void)
+{
+    EEPROM_EEBLOCK_M = EEPROM_STAT_BLOCK;
+    EEPROM_EEOFFSET_M = EEPROM_STAT_WORD;
+    EEPROM_STAT = EEPROM_EERDWR_M;
+    if(EEPROM_STAT)
+    {
+        EEPROM_EEBLOCK_M = MODE_EEPROM_BLOCK;
+        EEPROM_EEOFFSET_M = MODE_EEPROM_WORD;
+        MODE = EEPROM_EERDWR_M & 0xFF;
+        EEPROM_EEBLOCK_M = ADDR_EEPROM_BLOCK;
+        EEPROM_EEOFFSET_M = ADDR_EEPROM_WORD;
+        ADDR = EEPROM_EERDWR_M;
+    }
+}
+
+//function that saves MODE and ADDR to EEPROM and sets the EEPROM_STAT flag and saves it too
+void save_mode_and_addr(void)
+{
+    EEPROM_EEBLOCK_M = MODE_EEPROM_BLOCK;
+    EEPROM_EEOFFSET_M = MODE_EEPROM_WORD;
+    EEPROM_EERDWR_M = MODE;
+    EEPROM_EEBLOCK_M = ADDR_EEPROM_BLOCK;
+    EEPROM_EEOFFSET_M = ADDR_EEPROM_WORD;
+    EEPROM_EERDWR_M = ADDR;
+    EEPROM_STAT = 1;
+    EEPROM_EEBLOCK_M = EEPROM_STAT_BLOCK;
+    EEPROM_EEOFFSET_M = EEPROM_STAT_WORD;
+    EEPROM_EERDWR_M = EEPROM_STAT;
+}
+
 int main(void)
 {
     init_hw();
+    //recover_from_reset();
 
-    if(MODE == 'c')
+    if(MODE == 'c') //if controller mode start transmitting dmx data
         init_dmx_tx();
-    else if(MODE == 'd')
+    else if(MODE == 'd') //if device mode start receiving dmx data
         init_dmx_rx();
 
     while( 1 )
