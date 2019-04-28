@@ -1,8 +1,20 @@
-/**/
+#include <stdint.h>
+#include <stdbool.h>
+#include <stdio.h>
+#include <ctype.h>
+#include <string.h>
+
 #include "tm4c123gh6pm.h"
 
-#include <stdint.h>
-#include <string.h>
+#define MAX_CMD_SIZE    20
+#define MAX_WORD_SIZE   11
+#define MAX_ARG_COUNT   3
+
+#define GREEN_LED_MASK 8
+#define RED_LED_MASK 2
+
+#define RED_LED      (*((volatile uint32_t *)(0x42000000 + (0x400253FC-0x40000000)*32 + 1*4)))
+#define GREEN_LED    (*((volatile uint32_t *)(0x42000000 + (0x400253FC-0x40000000)*32 + 3*4)))
 
 #define PC5_MASK 32
 #define DMX_TX (*((volatile uint32_t *)(0x42000000 + (0x400063FC-0x40000000)*32 + 5*4)))
@@ -14,10 +26,45 @@
 #define EEPROM_STAT_BLOCK 2
 #define EEPROM_STAT_WORD 0
 
-//general globals
+/*
+ * FUNCTION DECLARATIONS
+ */
+
+void init_hw( void );
+void init_leds( void );
+void init_eeprom( void );
+void init_uart_coms( void );
+void init_uart_dmx( void );
+
+void uart_putc( char c );
+void uart_putstr( char *str );
+char uart_getc( void );
+
+uint8_t get_cmd( char cmd[MAX_CMD_SIZE] );
+uint8_t parse_cmd( char cmd[MAX_CMD_SIZE], char argv[MAX_ARG_COUNT][MAX_WORD_SIZE] );
+void    run_cmd( uint8_t argc, char argv[MAX_ARG_COUNT][MAX_WORD_SIZE] );
+
+void cmd_device();
+void cmd_controller();
+void cmd_clear();
+void cmd_set( uint8_t argc, char argv[MAX_ARG_COUNT][MAX_WORD_SIZE] );
+void cmd_get( uint8_t argc, char argv[MAX_ARG_COUNT][MAX_WORD_SIZE] );
+void cmd_on();
+void cmd_off();
+void cmd_max( uint8_t argc, char argv[MAX_ARG_COUNT][MAX_WORD_SIZE] );
+void cmd_address( uint8_t argc, char argv[MAX_ARG_COUNT][MAX_WORD_SIZE] );
+
+void wait_us( uint32_t us );
+
+void dmx_prime(void);
+void init_dmx_tx(void);
+void init_dmx_rx(void);
+
+/*
+ * GLOBAL VARIABLES
+ */
+
 char MODE = 'c';                            //tracks whether in controller or device mode
-char coms_cmd[128];                         //buffer for virtual COMS port
-unsigned char coms_index = 0;               //index for virtual COMS port buffer
 unint32_t EEPROM_STAT = 0;              //if 0 EEPROM was never written, else the MODE and ADDR have been stored
 
 //controller mode globals
@@ -31,57 +78,108 @@ uint32_t ADDR = 0;                      //stores dmx listening address
 unsigned char DMX_RX_DATA = 0;           //stores dmx data received at listening address
 unsigned char DMX_RX_BUFF[513];        //stores all received dmx data
 
-void init_hw( void );
+/*
+ * MAIN PROGRAM
+ */
 
-void init_uart_coms( uint32_t sys_clock, uint32_t baud_rate );
-void init_uart_dmx( void );
-void init_eeprom( void );
-
-void dmx_prime(void);
-void init_dmx_tx(void);
-void init_dmx_rx(void);
-
-void init_hw( void )
+int main( void )
 {
-	// Configure HW to work with 16 MHz XTAL, PLL enabled, system clock of 40 MHz
-    SYSCTL_RCC_R = SYSCTL_RCC_XTAL_16MHZ | SYSCTL_RCC_OSCSRC_MAIN | SYSCTL_RCC_USESYSDIV | (4 << SYSCTL_RCC_SYSDIV_S);
+    init_hw();
 
-    // Set GPIO ports to use APB (not needed since default configuration -- for clarity)
-    // Note UART on port A must use APB
-    SYSCTL_GPIOHBCTL_R = 0;
+    RED_LED = 0;
+    GREEN_LED = 1;
 
-    // Enable GPIO port A and C peripherals
-    SYSCTL_RCGC2_R = SYSCTL_RCGC2_GPIOA | SYSCTL_RCGC2_GPIOC;
+    while( true )
+    {
+        char cmd_str[MAX_CMD_SIZE] = {'\0'};
+        char argv[MAX_ARG_COUNT][MAX_WORD_SIZE];
+        uint8_t argc;
 
-    init_uart_coms(40000000,115200);
-    init_uart_dmx();
-    init_eeprom();
+        while( get_cmd( cmd_str ) == 0 );
+        argc = parse_cmd( cmd_str, argv );
+
+        run_cmd( argc, argv );
+    }
 }
 
-//function that configures UART for virtual COMS port
-void init_uart_coms( uint32_t sys_clock, uint32_t baud_rate )
+/*
+ */
+void init_hw( void )
 {
-    // setup UART0 for COMS PORT
-    SYSCTL_RCGCUART_R |= SYSCTL_RCGCUART_R0;    // enable UART0 module
-    //SYSCTL_RCGCGPIO_R |= SYSCTL_RCGCGPIO_R0;    // enable PORTA module
-    GPIO_PORTA_DEN_R |= 3;
-    GPIO_PORTA_AFSEL_R |= 3;                    // enable peripheral control for PA0 and PA1
-                                                // default: 2ma drive
-    GPIO_PORTA_PCTL_R = GPIO_PCTL_PA1_U0TX | GPIO_PCTL_PA0_U0RX;   // UART TX on PA1
+    // 16 mhz xtal, pll enable, 40 mhz sysclock
+    SYSCTL_RCC_R = SYSCTL_RCC_XTAL_16MHZ | SYSCTL_RCC_OSCSRC_MAIN | SYSCTL_RCC_USESYSDIV | (4 << SYSCTL_RCC_SYSDIV_S);
 
+    SYSCTL_GPIOHBCTL_R = 0;
 
-    float    brd  = (float) sys_clock / (16.0f * (float) baud_rate);
-    uint16_t bri  = (int) brd;
-    uint8_t  brf  = (int) ((brd - (float) bri) * 64.0f + 0.5f);
-             brf &= 0x3F;                       // only need bottom 6 bits
+    init_leds();
+    init_eeprom();
+    init_uart_coms();
+}
 
-    UART0_CTL_R   = 0;                          // disable UART0 for configuration
-    UART0_CC_R    = UART_CC_CS_SYSCLK;          // use system clock
-    UART0_IBRD_R  = bri;                        // baud rate divisor integer part
-    UART0_FBRD_R  = brf;                        // baud rate divisor fractional part
-    UART0_LCRH_R  = UART_LCRH_WLEN_8 | UART_LCRH_FEN; // 8-bit data frame with fifo
-    UART0_CTL_R   = UART_CTL_UARTEN | UART_CTL_TXE | UART_CTL_RXE; // enable UART0 and TX
+/*
+ */
+void init_leds( void )
+{
+    SYSCTL_RCGC2_R |= SYSCTL_RCGC2_GPIOF;
 
+    GPIO_PORTF_DIR_R = GREEN_LED_MASK | RED_LED_MASK;
+    GPIO_PORTF_DEN_R = GREEN_LED_MASK | RED_LED_MASK;
+}
+
+/*
+ */
+void init_eeprom(void)
+{
+    SYSCTL_RCGCEEPROM_R |= SYSCTL_RCGCEEPROM_R0;
+
+    wait_us( 1 );
+    while( EEPROM_EEDONE_R & EEPROM_EEDONE_WORKING );
+    if( EEPROM_EESUPP_R & (EEPROM_EESUPP_PRETRY | EEPROM_EESUPP_ERETRY) );
+
+    SYSCTL_SREEPROM_R |= SYSCTL_SREEPROM_R0;
+    SYSCTL_SREEPROM_R &= ~SYSCTL_SREEPROM_R0;
+
+    wait_us( 1 );
+    while( EEPROM_EEDONE_R & EEPROM_EEDONE_WORKING );
+    if( EEPROM_EESUPP_R & (EEPROM_EESUPP_PRETRY | EEPROM_EESUPP_ERETRY) );
+}
+
+/*
+ * setup and configure serial port communication
+ *
+ * U0Rx -> PA0
+ * U0Tx -> PA1
+ *
+ * baud rate    9600
+ * data frame   8-bit
+ * fifa         enabled
+ * receive      enabled
+ * transmit     enabled
+ */
+void init_uart_coms( void )
+{
+    // enable UART0 and PORTA modules
+    SYSCTL_RCGCUART_R |= SYSCTL_RCGCUART_R0;
+    SYSCTL_RCGC2_R |= SYSCTL_RCGC2_GPIOA;
+
+    // configure PA0 and PA1
+    GPIO_PORTA_AFSEL_R |= 0x3;
+    GPIO_PORTA_DEN_R   |= 0x3;
+    GPIO_PORTA_DIR_R   |= 0x2;
+    GPIO_PORTA_PCTL_R  &= ~( GPIO_PCTL_PA0_M | GPIO_PCTL_PA1_M );
+    GPIO_PORTA_PCTL_R  |= ( GPIO_PCTL_PA0_U0RX | GPIO_PCTL_PA1_U0TX );
+
+    UART0_CTL_R &= ~UART_CTL_UARTEN;
+
+    // configure for 9600 baud
+    UART0_IBRD_R = 260;
+    UART0_FBRD_R = 27;
+
+    UART0_LCRH_R |= UART_LCRH_WLEN_8 | UART_LCRH_FEN;
+
+    UART0_CC_R    = UART_CC_CS_SYSCLK;
+
+    UART0_CTL_R |= UART_CTL_UARTEN | UART_CTL_RXE | UART_CTL_TXE;
 }
 
 //function that configures the UART, GPIO, and TIMER for DMX512
@@ -120,22 +218,221 @@ void init_uart_dmx( void )
     NVIC_EN0_R |= 1 << (INT_TIMER1A - 16);      // turn on interrupt 37 (TIMER1A)
 }
 
-void init_eeprom(void)
+/*
+ * print character to the serial console
+ */
+void uart_putc(char c)
 {
-    SYSCTL_RCGCEEPROM_R |= SYSCTL_RCGCEEPROM_R0;
-    int i;
-    for(i=0;i<6;i++)
-        __asm("NOP");
-    while(EEPROM_EEDONE_R & EEPROM_EEDONE_WORKING);
-    if((EEPROM_EESUPP_R & EEPROM_EESUPP_PRETRY) || (EEPROM_EESUPP_R & EEPROM_EESUPP_ERETRY))
-        break; //error
-    SYSCTL_SREEPROM_R |= SYSCTL_SREEPROM_R0;
-    while(!(SYSCTL_PREEPROM_R & SYSCTL_PREEPROM_R0));
-    for(i=0;i<6;i++)
-       __asm("NOP");
-    while(EEPROM_EEDONE_R & EEPROM_EEDONE_WORKING);
-    if((EEPROM_EESUPP_R & EEPROM_EESUPP_PRETRY) || (EEPROM_EESUPP_R & EEPROM_EESUPP_ERETRY))
-        break; //error
+    while( UART0_FR_R & UART_FR_TXFF );
+
+    UART0_DR_R = c;
+}
+
+/*
+ * print string to the serial console
+ *
+ * note: blocking
+ */
+void uart_putstr( char *str )
+{
+    uint8_t i;
+
+    for( i = 0; i < strlen( str ); ++i )
+      uart_putc( str[i] );
+}
+
+/*
+ * get character from serial receive line
+ *
+ * note: blocking
+ */
+char uart_getc()
+{
+    while( UART0_FR_R & UART_FR_RXFE );
+
+    return UART0_DR_R & 0xFF;
+}
+
+/*
+ * return 0 on empty command
+ */
+uint8_t get_cmd( char cmd[MAX_CMD_SIZE] )
+{
+    char ch;
+    uint8_t cmd_idx = 0;
+    uint8_t word_idx = 0;
+
+    uart_putstr( "$ " );
+    // wait for user to enter a command
+    while( (ch = uart_getc()) != '\r' )
+    {
+        // handle backspace
+        if( (ch == '\b' || ch == 127) && cmd_idx > 0 )
+        {
+            uart_putstr( "\b \b" );
+            --cmd_idx;
+
+            if( word_idx != 0 )
+                --word_idx;
+        }
+        // handle cmd exceeding MAX_CMD_SIZE
+        else if( cmd_idx == MAX_CMD_SIZE-1 )
+        {
+            continue;
+        }
+        // handle argument delimiters
+        else if( ch == ' ' || ch == ',' )
+        {
+            uart_putc( ch );
+            cmd[cmd_idx++] = ' ';
+            word_idx = 0;
+        }
+        // handle alphanumeric chars
+        else if( (word_idx != MAX_WORD_SIZE-1) && isalnum( ch ) )
+        {
+            uart_putc( ch );
+            cmd[cmd_idx++] = ch;
+            ++word_idx;
+        }
+    }
+
+    uart_putstr( "\n\r" );
+    cmd[cmd_idx] = '\0';
+
+    return cmd_idx;
+}
+
+/*
+ * cmd only has alphanumerics and spaces (delimiter)
+ */
+uint8_t parse_cmd( char cmd[MAX_CMD_SIZE], char argv[MAX_ARG_COUNT][MAX_WORD_SIZE] )
+{
+    uint8_t n = strlen( cmd );
+    uint8_t argc = 0;
+    uint8_t cmd_idx = 0;
+    uint8_t word_idx = 0;
+
+    for( cmd_idx = 0; cmd_idx < n && argc < MAX_ARG_COUNT; ++cmd_idx )
+    {
+        char ch = cmd[cmd_idx];
+
+        if( ch != ' ' && word_idx < MAX_WORD_SIZE-1 )
+        {
+            if( cmd_idx+1 == n )
+            {
+                argv[argc][word_idx++] = ch;
+                argv[argc++][word_idx] = '\0';
+                word_idx = 0;
+            }
+            else
+            {
+                argv[argc][word_idx++] = ch;
+            }
+
+        }
+        else if( word_idx != 0 )
+        {
+            argv[argc++][word_idx] = '\0';
+            word_idx = 0;
+
+            if( ch != ' ' )
+                argv[argc][word_idx++] = ch;
+        }
+    }
+
+    return argc;
+}
+
+/*
+ */
+void run_cmd( uint8_t argc, char argv[MAX_ARG_COUNT][MAX_WORD_SIZE] )
+{
+    char *cmd = argv[0];
+
+    if( strcmp( cmd, "device" ) == 0 )
+        // change into device mode
+        cmd_device();
+    else if( strcmp( cmd, "controller" ) == 0 )
+        // change into controller mode
+        cmd_controller();
+    else if( strcmp( cmd, "clear" ) == 0 )
+        // set values of all addresses to 0
+        cmd_clear();
+    else if( strcmp( cmd, "set" ) == 0 )
+        // set address A to value V
+        cmd_set( argc, argv );
+    else if( strcmp( cmd, "get" ) == 0 )
+        // get value at address A
+        cmd_get( argc, argv );
+    else if( strcmp( cmd, "on" ) == 0 )
+        // turn on dmx transmission
+        cmd_on();
+    else if( strcmp( cmd, "off" ) == 0 )
+        // turn off dmx transmission
+        cmd_off();
+    else if( strcmp( cmd, "max" ) == 0 )
+        // only M addresses will be sent
+        cmd_max( argc, argv );
+    else if( strcmp( cmd, "address" ) == 0 )
+        // device address to use after next next break
+        cmd_address( argc, argv );
+    else
+    {
+    }
+}
+
+void cmd_device()
+{
+}
+
+void cmd_controller()
+{
+}
+
+void cmd_clear()
+{
+    uint16_t i;
+
+    for( i = 1; i <= max_address; ++i )
+        dmx_data[i] = 0;
+}
+
+void cmd_set( uint8_t argc, char argv[MAX_ARG_COUNT][MAX_WORD_SIZE] )
+{
+}
+
+void cmd_get( uint8_t argc, char argv[MAX_ARG_COUNT][MAX_WORD_SIZE] )
+{
+}
+
+void cmd_on()
+{
+}
+
+void cmd_off()
+{
+}
+
+void cmd_max( uint8_t argc, char argv[MAX_ARG_COUNT][MAX_WORD_SIZE] )
+{
+}
+
+void cmd_address( uint8_t argc, char argv[MAX_ARG_COUNT][MAX_WORD_SIZE] )
+{
+}
+
+void wait_us( uint32_t us )
+{
+    __asm("WMS_LOOP0:   MOV  R1, #6");          // 1
+    __asm("WMS_LOOP1:   SUB  R1, #1");          // 6
+    __asm("             CBZ  R1, WMS_DONE1");   // 5+1*3
+    __asm("             NOP");                  // 5
+    __asm("             B    WMS_LOOP1");       // 5*3
+    __asm("WMS_DONE1:   SUB  R0, #1");          // 1
+    __asm("             CBZ  R0, WMS_DONE0");   // 1
+    __asm("             B    WMS_LOOP0");       // 1*3
+    __asm("WMS_DONE0:");                        // ---
+                                                // 40 clocks/us + error
 }
 
 //function that "primes the pump" for dmx transmission
@@ -233,33 +530,6 @@ void Timer1ISR(void)
     TIMER1_ICR_R |= TIMER_ICR_TATOCINT;             // clear timer interrupt flag
 }
 
-// Blocking function that writes a serial character when the UART buffer is not full
-void putcUart0(char c)
-{
-    while (UART0_FR_R & UART_FR_TXFF);
-    UART0_DR_R = c;
-}
-
-// Blocking function that writes a string when the UART buffer is not full
-void putsUart0(char* str)
-{
-    int i;
-    for (i = 0; i < strlen(str); i++)
-      putcUart0(str[i]);
-}
-
-int parse(char cmd[128])
-{
-    int i = 0;
-    for(i=0;i<coms_index;i++){
-        switch(i){
-
-        }
-    }
-    coms_index = 0;
-    return 0;
-}
-
 //TODO: add init_eeprom function and put in init_hw
 
 //function that loads MODE and ADDR vars from EEPROM if they were saved
@@ -292,27 +562,5 @@ void save_mode_and_addr(void)
     EEPROM_EEBLOCK_R = EEPROM_STAT_BLOCK;
     EEPROM_EEOFFSET_R = EEPROM_STAT_WORD;
     EEPROM_EERDWR_R = EEPROM_STAT;
-}
-
-int main(void)
-{
-    init_hw();
-    //recover_from_reset();
-
-    if(MODE == 'c') //if controller mode start transmitting dmx data
-        init_dmx_tx();
-    else if(MODE == 'd') //if device mode start receiving dmx data
-        init_dmx_rx();
-
-    while( 1 )
-    {
-        char c = UART0_DR_R & 0xFF;
-        if(c)
-        {
-            coms_cmd[coms_index++] = c;
-            if(c == '\r')
-                parse(coms_cmd);
-        }
-    }
 }
 
