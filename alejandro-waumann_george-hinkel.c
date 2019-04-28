@@ -26,16 +26,20 @@ unsigned int dmx512_max = 512;              //stores DMX max value
 unsigned int dmx512_state = 0;              //global to control state of DMX512 Transmission algorithm
 
 //device mode globals
-unsigned int dmx512_rx_index = 0;           //index of DMX512 receive buffer
+unsigned int DMX_RX_INDEX = 0;           //index of DMX512 receive buffer
 uint32_t ADDR = 0;                      //stores dmx listening address
-unsigned char dmx512_rx_data = 0;           //stores dmx data received at listening address
-unsigned char dmx512_rx_buffer[513];        //stores all received dmx data
+unsigned char DMX_RX_DATA = 0;           //stores dmx data received at listening address
+unsigned char DMX_RX_BUFF[513];        //stores all received dmx data
 
 void init_hw( void );
 
 void init_uart_coms( uint32_t sys_clock, uint32_t baud_rate );
 void init_uart_dmx( void );
 void init_eeprom( void );
+
+void dmx_prime(void);
+void init_dmx_tx(void);
+void init_dmx_rx(void);
 
 void init_hw( void )
 {
@@ -167,57 +171,57 @@ void init_dmx_rx(void)
 //UART1 interrupt service routine, manages TX and RX fifos as well as break conditions in device mode
 void Uart1ISR(void) //TODO: add handling for UART error conditions
 {
-    //TX INTERRUPT -> fill TX fifo
+    //TRANSMIT FIFO LEVEL INTERRUPT -> fill TX fifo
     if(UART1_MIS_R & UART_MIS_TXMIS)
     {
-        while(!(UART1_FR_R & UART_FR_TXFF))//while TX fifo not full
+        while(!(UART1_FR_R & UART_FR_TXFF))                 // while TX fifo not full
         {
-            UART1_DR_R = dmx512_data[(dmx512_state++) - 2];
-            if((dmx512_state - 2) >= dmx512_max )
+            UART1_DR_R = dmx512_data[(dmx512_state++) - 2]; // fill the TX fifo from the dmx data buffer
+            if((dmx512_state - 2) >= dmx512_max )           // when controller sends last dmx data
             {
-                while(UART1_FR_R & UART_FR_BUSY);//wait until transmission completes
-                UART1_ICR_R |= UART_ICR_TXIC;   // clear the TX interrupt
-                dmx_prime();
+                while(UART1_FR_R & UART_FR_BUSY);           // wait until transmission completes
+                UART1_ICR_R |= UART_ICR_TXIC;               // clear the TX interrupt
+                dmx_prime();                                // restart the dmx protocol
                 return;
             }
         }
-        UART1_ICR_R |= UART_ICR_TXIC;   // clear the TX interrupt flag
+        UART1_ICR_R |= UART_ICR_TXIC;                       // clear the TX interrupt flag
     }
 
-    //RX INTERRUPT -> empty RX fifo
+    //RECEIVE FIFO LEVEL INTERRUPT -> empty RX fifo
     else if(UART1_MIS_R & UART_MIS_RXMIS)
     {
-        while(!(UART1_FR_R & UART_FR_RXFE))//while RX fifo not empty
+        while(!(UART1_FR_R & UART_FR_RXFE))                 // while RX fifo not empty
         {
-            dmx512_rx_buffer[dmx512_rx_index++] = UART1_DR_R & 0xFF;
+            DMX_RX_BUFF[DMX_RX_INDEX++] = UART1_DR_R & 0xFF;// fill the receive buffer
         }
-        UART1_ICR_R |= UART_ICR_RXIC;   // clear the RX interrupt flag
+        UART1_ICR_R |= UART_ICR_RXIC;                       // clear the RX interrupt flag
     }
 
-    //BE INTERRUPT -> empty RX fifo and clear receive buffer
+    //BREAK ERROR INTERRUPT -> empty RX fifo, clear receive buffer, update dmx data at listening address
     if(UART1_MIS_R & UART_MIS_BEMIS)
     {
-        while(!(UART1_FR_R & UART_FR_RXFE))//while RX fifo not empty
+        while(!(UART1_FR_R & UART_FR_RXFE))                 // while RX fifo not empty
         {
-            dmx512_rx_buffer[dmx512_rx_index++] = UART1_DR_R & 0xFF;
+            DMX_RX_BUFF[DMX_RX_INDEX++] = UART1_DR_R & 0xFF;// fill the receive buffer
         }
-        dmx512_rx_index = 0;
-        dmx512_rx_data = dmx512_rx_buffer[ADDR];
-        UART1_ICR_R |= UART_ICR_BEIC;   // clear the BE interrupt flag
+        DMX_RX_INDEX = 0;                                   // reset RX index b/c dmx protocol restarting
+        DMX_RX_DATA = DMX_RX_BUFF[ADDR];                    // update the dmx data at listening address
+        UART1_ICR_R |= UART_ICR_BEIC;                       // clear the BE interrupt flag
     }
 }
 
 //TIMER1 interrupt service routine, handles priming the pump and starting uart for DMX transmission
 void Timer1ISR(void)
 {
-    if(dmx512_state == 0)
+    if(dmx512_state == 0)                           // state: 0->1 => BREAK->MAB
     {
         dmx512_state = 1;                           // advance dmx512 state
         TIMER1_TAILR_R = 480;                       // set Timer1A ILR to appropriate value for 12 us
         DMX_TX = 1;                                 // drive DMX_TX high
         TIMER1_CTL_R |= TIMER_CTL_TAEN;             // turn on timer 1
     }
-    else if(dmx512_state == 1)
+    else if(dmx512_state == 1)                      // state: 1->2 => MAB->UART TX
     {
         dmx512_state = 2;                           // advance dmx512 state
         GPIO_PORTC_AFSEL_R |= 32 | 16;              // set 5th and 6th bits to enable peripheral control for PC5 and PC4
@@ -225,9 +229,8 @@ void Timer1ISR(void)
                            |  GPIO_PCTL_PC4_U1RX;   // UART1 RX on PC4
         UART1_CTL_R  |= UART_CTL_UARTEN             // enable UART1
                      |  UART_CTL_TXE;               // enable UART1 transmission
-        //UART1_DR_R = dmx512_data[(dmx512_state++) - 2]; //maybe the interrupt will occur any way
     }
-    TIMER1_ICR_R |= TIMER_ICR_TATOCINT;
+    TIMER1_ICR_R |= TIMER_ICR_TATOCINT;             // clear timer interrupt flag
 }
 
 // Blocking function that writes a serial character when the UART buffer is not full
