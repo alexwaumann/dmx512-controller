@@ -64,19 +64,19 @@ void init_dmx_rx(void);
  * GLOBAL VARIABLES
  */
 
-char MODE = 'c';                            //tracks whether in controller or device mode
-unint32_t EEPROM_STAT = 0;              //if 0 EEPROM was never written, else the MODE and ADDR have been stored
+char MODE = 'c';                //tracks whether in controller ('c') or device mode ('d')
+unint32_t EEPROM_STAT = 0;      //if 0 EEPROM was never written, else the MODE and ADDR have been stored
 
 //controller mode globals
-unsigned char dmx512_data[513];             //stores values of DMX512 data to be transmitted
-unsigned int dmx512_max = 512;              //stores DMX max value
-unsigned int dmx512_state = 0;              //global to control state of DMX512 Transmission algorithm
+unsigned char DMX_TX_DATA[513]; //stores values of DMX512 data to be transmitted
+uint32_t DMX_MAX = 512;         //stores DMX max value
+uint32_t DMX_STATE = 0;         //global to control state of DMX512 Transmission algorithm
 
 //device mode globals
-unsigned int DMX_RX_INDEX = 0;           //index of DMX512 receive buffer
-uint32_t ADDR = 0;                      //stores dmx listening address
-unsigned char DMX_RX_DATA = 0;           //stores dmx data received at listening address
-unsigned char DMX_RX_BUFF[513];        //stores all received dmx data
+uint32_t DMX_RX_INDEX = 0;      //index of DMX512 receive buffer
+uint32_t ADDR = 0;              //stores dmx listening address
+unsigned char DMX_RX_DATA = 0;  //stores dmx data received at listening address
+unsigned char DMX_RX_BUFF[513]; //stores all received dmx data
 
 /*
  * MAIN PROGRAM
@@ -439,7 +439,7 @@ void wait_us( uint32_t us )
 void dmx_prime(void)
 {
     //Break
-    dmx512_state = 0;
+    DMX_STATE = 0;
     GPIO_PORTC_AFSEL_R  &= ~32;                 // clear 6th bit to disable peripheral control for PC5
     TIMER1_TAILR_R = 7040;                      // set Timer1A ILR to appropriate value for 176 us
     DMX_DE = 0;                                 // drive DMX_DE low to enable transmission
@@ -473,8 +473,8 @@ void Uart1ISR(void) //TODO: add handling for UART error conditions
     {
         while(!(UART1_FR_R & UART_FR_TXFF))                 // while TX fifo not full
         {
-            UART1_DR_R = dmx512_data[(dmx512_state++) - 2]; // fill the TX fifo from the dmx data buffer
-            if((dmx512_state - 2) >= dmx512_max )           // when controller sends last dmx data
+            UART1_DR_R = DMX_TX_DATA[(DMX_STATE++) - 2];    // fill the TX fifo from the dmx data buffer
+            if((DMX_STATE - 2) >= DMX_MAX )                 // when controller sends last dmx data
             {
                 while(UART1_FR_R & UART_FR_BUSY);           // wait until transmission completes
                 UART1_ICR_R |= UART_ICR_TXIC;               // clear the TX interrupt
@@ -511,16 +511,16 @@ void Uart1ISR(void) //TODO: add handling for UART error conditions
 //TIMER1 interrupt service routine, handles priming the pump and starting uart for DMX transmission
 void Timer1ISR(void)
 {
-    if(dmx512_state == 0)                           // state: 0->1 => BREAK->MAB
+    if(DMX_STATE == 0)                              // state: 0->1 => BREAK->MAB
     {
-        dmx512_state = 1;                           // advance dmx512 state
+        DMX_STATE = 1;                              // advance dmx512 state
         TIMER1_TAILR_R = 480;                       // set Timer1A ILR to appropriate value for 12 us
         DMX_TX = 1;                                 // drive DMX_TX high
         TIMER1_CTL_R |= TIMER_CTL_TAEN;             // turn on timer 1
     }
-    else if(dmx512_state == 1)                      // state: 1->2 => MAB->UART TX
+    else if(DMX_STATE == 1)                         // state: 1->2 => MAB->UART TX
     {
-        dmx512_state = 2;                           // advance dmx512 state
+        DMX_STATE = 2;                              // advance dmx512 state
         GPIO_PORTC_AFSEL_R |= 32 | 16;              // set 5th and 6th bits to enable peripheral control for PC5 and PC4
         GPIO_PORTC_PCTL_R  |= GPIO_PCTL_PC5_U1TX    // UART1 TX ON PC5
                            |  GPIO_PCTL_PC4_U1RX;   // UART1 RX on PC4
@@ -530,37 +530,35 @@ void Timer1ISR(void)
     TIMER1_ICR_R |= TIMER_ICR_TATOCINT;             // clear timer interrupt flag
 }
 
-//TODO: add init_eeprom function and put in init_hw
-
 //function that loads MODE and ADDR vars from EEPROM if they were saved
 void recover_from_reset(void)
 {
-    EEPROM_EEBLOCK_R = EEPROM_STAT_BLOCK;
-    EEPROM_EEOFFSET_R = EEPROM_STAT_WORD;
-    EEPROM_STAT = EEPROM_EERDWR_R;
-    if(EEPROM_STAT)
+    EEPROM_EEBLOCK_R = EEPROM_STAT_BLOCK;     // set EEBLOCK to the block for EEPROM_STAT
+    EEPROM_EEOFFSET_R = EEPROM_STAT_WORD;     // set EEOFFSET to the offset for EEPROM_STAT
+    EEPROM_STAT = EEPROM_EERDWR_R;            // read the EEPROM_STAT from the block and offset for EEPROM_STAT
+    if(EEPROM_STAT)                           // if the EEPROM has been saved to
     {
-        EEPROM_EEBLOCK_R = MODE_EEPROM_BLOCK;
-        EEPROM_EEOFFSET_R = MODE_EEPROM_WORD;
-        MODE = EEPROM_EERDWR_R & 0xFF;
-        EEPROM_EEBLOCK_R = ADDR_EEPROM_BLOCK;
-        EEPROM_EEOFFSET_R = ADDR_EEPROM_WORD;
-        ADDR = EEPROM_EERDWR_R;
+        EEPROM_EEBLOCK_R = MODE_EEPROM_BLOCK; // set EEBLOCK to the block for MODE
+        EEPROM_EEOFFSET_R = MODE_EEPROM_WORD; // set EEOFFSET to the offset for MODE
+        MODE = EEPROM_EERDWR_R & 0xFF;        // read the MODE from the block and offset for MODE
+        EEPROM_EEBLOCK_R = ADDR_EEPROM_BLOCK; // set EEBLOCK to the block for ADDR
+        EEPROM_EEOFFSET_R = ADDR_EEPROM_WORD; // set EEOFFSET to the offset for ADDR
+        ADDR = EEPROM_EERDWR_R;               // read the ADDR from the block and offset for ADDR
     }
 }
 
 //function that saves MODE and ADDR to EEPROM and sets the EEPROM_STAT flag and saves it too
 void save_mode_and_addr(void)
 {
-    EEPROM_EEBLOCK_R = MODE_EEPROM_BLOCK;
-    EEPROM_EEOFFSET_R = MODE_EEPROM_WORD;
-    EEPROM_EERDWR_R = MODE;
-    EEPROM_EEBLOCK_R = ADDR_EEPROM_BLOCK;
-    EEPROM_EEOFFSET_R = ADDR_EEPROM_WORD;
-    EEPROM_EERDWR_R = ADDR;
-    EEPROM_STAT = 1;
-    EEPROM_EEBLOCK_R = EEPROM_STAT_BLOCK;
-    EEPROM_EEOFFSET_R = EEPROM_STAT_WORD;
-    EEPROM_EERDWR_R = EEPROM_STAT;
+    EEPROM_EEBLOCK_R = MODE_EEPROM_BLOCK;   // set EEBLOCK to the block for MODE
+    EEPROM_EEOFFSET_R = MODE_EEPROM_WORD;   // set EEOFFSET to the offset for MODE
+    EEPROM_EERDWR_R = MODE;                 // write the MODE to the block and offset for MODE
+    EEPROM_EEBLOCK_R = ADDR_EEPROM_BLOCK;   // set EEBLOCK to the block for ADDR
+    EEPROM_EEOFFSET_R = ADDR_EEPROM_WORD;   // set EEOFFSET to the offset for ADDR
+    EEPROM_EERDWR_R = ADDR;                 // write the ADDR to the block and offset for ADDR
+    EEPROM_STAT = 1;                        // set the status of EEPROM storage to true
+    EEPROM_EEBLOCK_R = EEPROM_STAT_BLOCK;   // set EEBLOCK to the block for EEPROM_STAT
+    EEPROM_EEOFFSET_R = EEPROM_STAT_WORD;   // set EEOFFSET to the offset for EEPROM_STAT
+    EEPROM_EERDWR_R = EEPROM_STAT;          // write the EEPROM_STAT to the block and offset for EEPROM_STAT
 }
 
