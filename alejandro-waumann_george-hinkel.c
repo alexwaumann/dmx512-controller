@@ -143,7 +143,7 @@ void init_leds( void )
 /**/
 void init_timer_led_blink( void )
 {
-    SYSCTL_RCGCTIMER_R |= SYSCTL_RCGCTIMER_R2;  // turn on timer
+    SYSCTL_RCGCTIMER_R |= SYSCTL_RCGCTIMER_R2;  // turn on timer 2
     TIMER2_CTL_R &= ~TIMER_CTL_TAEN;            // turn off timer before configuring
     TIMER2_CFG_R = TIMER_CFG_32_BIT_TIMER;      // configure as 32-bit timer (concatenated)
     TIMER2_TAMR_R = TIMER_TAMR_TAMR_1_SHOT;     // configure in one-shot mode (count down)
@@ -151,7 +151,7 @@ void init_timer_led_blink( void )
     TIMER2_TAILR_R = 10000000;                  // set TIMER2 ILR to appropriate value for 250ms = 10,000,000
     NVIC_EN0_R |= 1 << (INT_TIMER2A - 16);      // turn on interrupt 39 (TIMER2A)
 
-    SYSCTL_RCGCTIMER_R |= SYSCTL_RCGCTIMER_R3;  // turn on timer
+    SYSCTL_RCGCTIMER_R |= SYSCTL_RCGCTIMER_R3;  // turn on timer 3
     TIMER3_CTL_R &= ~TIMER_CTL_TAEN;            // turn off timer before configuring
     TIMER3_CFG_R = TIMER_CFG_32_BIT_TIMER;      // configure as 32-bit timer (concatenated)
     TIMER3_TAMR_R = TIMER_TAMR_TAMR_1_SHOT;     // configure in one-shot mode (count down)
@@ -283,8 +283,11 @@ void uart_putstr( char *str )
 char uart_getc()
 {
     while( UART0_FR_R & UART_FR_RXFE );
-    GREEN_LED = 1;                          // turn on Green LED/ RX LED for 250ms
-    TIMER2_CTL_R |= TIMER_CTL_TAEN;         // enable timer 2 to flash it
+    if(MODE == 'c')
+    {
+        GREEN_LED = 1;                          // turn on Green LED/ RX LED for 250ms
+        TIMER2_CTL_R |= TIMER_CTL_TAEN;         // enable timer 2 to flash it
+    }
     return UART0_DR_R & 0xFF;
 }
 
@@ -566,7 +569,10 @@ void Uart1ISR(void) //TODO: add handling for UART error conditions
         RX_STATE = 1;
         while(!(UART1_FR_R & UART_FR_RXFE))                 // while RX fifo not empty
         {
-            DMX_RX_BUFF[DMX_RX_INDEX++] = UART1_DR_R & 0xFF;// fill the receive buffer
+            DMX_RX_BUFF[DMX_RX_INDEX] = UART1_DR_R & 0xFF;// fill the receive buffer
+            if(DMX_RX_INDEX == ADDR)
+                DMX_RX_DATA = DMX_RX_BUFF[ADDR];            // update the dmx data at listening address
+            DMX_RX_INDEX++;
         }
         UART1_ICR_R |= UART_ICR_RXIC;                       // clear the RX interrupt flag
     }
@@ -576,12 +582,14 @@ void Uart1ISR(void) //TODO: add handling for UART error conditions
     {
         while(!(UART1_FR_R & UART_FR_RXFE))                 // while RX fifo not empty
         {
-            DMX_RX_BUFF[DMX_RX_INDEX++] = UART1_DR_R & 0xFF;// fill the receive buffer
+            DMX_RX_BUFF[DMX_RX_INDEX] = UART1_DR_R & 0xFF;// fill the receive buffer
+            if(DMX_RX_INDEX == ADDR)
+                DMX_RX_DATA = DMX_RX_BUFF[ADDR];            // update the dmx data at listening address
+            DMX_RX_INDEX++;
         }
         RX_STATE = 0;
         TIMER3_CTL_R |= TIMER_CTL_TAEN;                     // turn on timer 3
         DMX_RX_INDEX = 0;                                   // reset RX index b/c dmx protocol restarting
-        DMX_RX_DATA = DMX_RX_BUFF[ADDR];                    // update the dmx data at listening address
         UART1_ICR_R |= UART_ICR_BEIC;                       // clear the BE interrupt flag
     }
 }
