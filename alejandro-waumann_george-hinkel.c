@@ -1,3 +1,6 @@
+/*
+ * INCLUDES
+ */
 #include <stdint.h>
 #include <stdbool.h>
 #include <stdio.h>
@@ -6,25 +9,32 @@
 
 #include "tm4c123gh6pm.h"
 
+/*
+ * DEFINES
+ */
+//parsing defines
 #define MAX_CMD_SIZE    20
 #define MAX_WORD_SIZE   11
 #define MAX_ARG_COUNT   3
 
+//bit masks
 #define GREEN_LED_MASK 8
 #define RED_LED_MASK 2
-
-#define RED_LED      (*((volatile uint32_t *)(0x42000000 + (0x400253FC-0x40000000)*32 + 1*4)))
-#define GREEN_LED    (*((volatile uint32_t *)(0x42000000 + (0x400253FC-0x40000000)*32 + 3*4)))
-
 #define PC5_MASK 32
-#define DMX_TX (*((volatile uint32_t *)(0x42000000 + (0x400063FC-0x40000000)*32 + 5*4)))
-#define DMX_DE (*((volatile uint32_t *)(0x42000000 + (0x400063FC-0x40000000)*32 + 6*4)))
-#define MODE_EEPROM_BLOCK 0
-#define MODE_EEPROM_WORD 0
-#define ADDR_EEPROM_BLOCK 1
-#define ADDR_EEPROM_WORD 0
-#define EEPROM_STAT_BLOCK 2
-#define EEPROM_STAT_WORD 0
+
+//Bit-Banded defines
+#define RED_LED      (*((volatile uint32_t *)(0x42000000 + (0x400253FC-0x40000000)*32 + 1*4))) //TX LED
+#define GREEN_LED    (*((volatile uint32_t *)(0x42000000 + (0x400253FC-0x40000000)*32 + 3*4))) //RX LED
+#define DMX_TX       (*((volatile uint32_t *)(0x42000000 + (0x400063FC-0x40000000)*32 + 5*4)))
+#define DMX_DE       (*((volatile uint32_t *)(0x42000000 + (0x400063FC-0x40000000)*32 + 6*4)))
+
+//EEPROM addresses
+#define MODE_EEPROM_BLOCK   0
+#define MODE_EEPROM_WORD    0
+#define ADDR_EEPROM_BLOCK   1
+#define ADDR_EEPROM_WORD    0
+#define EEPROM_STAT_BLOCK   2
+#define EEPROM_STAT_WORD    0
 
 /*
  * FUNCTION DECLARATIONS
@@ -34,7 +44,8 @@ void init_hw( void );
 void init_leds( void );
 void init_eeprom( void );
 void init_uart_coms( void );
-void init_uart_dmx( void );
+void init_dmx_hw( void );
+void init_timer_led_blink( void );
 
 void uart_putc( char c );
 void uart_putstr( char *str );
@@ -59,6 +70,7 @@ void wait_us( uint32_t us );
 void dmx_prime(void);
 void init_dmx_tx(void);
 void init_dmx_rx(void);
+void blink_rx_coms(void);
 
 /*
  * GLOBAL VARIABLES
@@ -66,6 +78,7 @@ void init_dmx_rx(void);
 
 char MODE = 'c';                //tracks whether in controller ('c') or device mode ('d')
 unint32_t EEPROM_STAT = 0;      //if 0 EEPROM was never written, else the MODE and ADDR have been stored
+uint32_t RX_STATE = 0;
 
 //controller mode globals
 unsigned char DMX_TX_DATA[513]; //stores values of DMX512 data to be transmitted
@@ -85,9 +98,8 @@ unsigned char DMX_RX_BUFF[513]; //stores all received dmx data
 int main( void )
 {
     init_hw();
-
     RED_LED = 0;
-    GREEN_LED = 1;
+    GREEN_LED = 0;
 
     while( true )
     {
@@ -112,8 +124,10 @@ void init_hw( void )
     SYSCTL_GPIOHBCTL_R = 0;
 
     init_leds();
+    init_timer_led_blink();
     init_eeprom();
     init_uart_coms();
+    init_dmx_hw();
 }
 
 /*
@@ -124,6 +138,26 @@ void init_leds( void )
 
     GPIO_PORTF_DIR_R = GREEN_LED_MASK | RED_LED_MASK;
     GPIO_PORTF_DEN_R = GREEN_LED_MASK | RED_LED_MASK;
+}
+
+/**/
+void init_timer_led_blink( void )
+{
+    SYSCTL_RCGCTIMER_R |= SYSCTL_RCGCTIMER_R2;  // turn on timer
+    TIMER2_CTL_R &= ~TIMER_CTL_TAEN;            // turn off timer before configuring
+    TIMER2_CFG_R = TIMER_CFG_32_BIT_TIMER;      // configure as 32-bit timer (concatenated)
+    TIMER2_TAMR_R = TIMER_TAMR_TAMR_1_SHOT;     // configure in one-shot mode (count down)
+    TIMER2_IMR_R = TIMER_IMR_TATOIM;            // turn on timer2 interrupt
+    TIMER2_TAILR_R = 10000000;                  // set TIMER2 ILR to appropriate value for 250ms = 10,000,000
+    NVIC_EN0_R |= 1 << (INT_TIMER2A - 16);      // turn on interrupt 39 (TIMER2A)
+
+    SYSCTL_RCGCTIMER_R |= SYSCTL_RCGCTIMER_R3;  // turn on timer
+    TIMER3_CTL_R &= ~TIMER_CTL_TAEN;            // turn off timer before configuring
+    TIMER3_CFG_R = TIMER_CFG_32_BIT_TIMER;      // configure as 32-bit timer (concatenated)
+    TIMER3_TAMR_R = TIMER_TAMR_TAMR_1_SHOT;     // configure in one-shot mode (count down)
+    TIMER3_IMR_R = TIMER_IMR_TATOIM;            // turn on timer3 interrupt
+    TIMER3_TAILR_R = 80000000;                  // set TIMER3 ILR to appropriate value for 2s = 80,000,000
+    NVIC_EN1_R |= 1 << (INT_TIMER3A - 16);      // turn on interrupt 51 (TIMER2A)
 }
 
 /*
@@ -183,7 +217,7 @@ void init_uart_coms( void )
 }
 
 //function that configures the UART, GPIO, and TIMER for DMX512
-void init_uart_dmx( void )
+void init_dmx_hw( void )
 {
     //GPIO PORTC :: for DMX-512
     SYSCTL_RCGCGPIO_R  |= SYSCTL_RCGCGPIO_R2;   // enable PORTC module
@@ -249,7 +283,8 @@ void uart_putstr( char *str )
 char uart_getc()
 {
     while( UART0_FR_R & UART_FR_RXFE );
-
+    GREEN_LED = 1;                          // turn on Green LED/ RX LED for 250ms
+    TIMER2_CTL_R |= TIMER_CTL_TAEN;         // enable timer 2 to flash it
     return UART0_DR_R & 0xFF;
 }
 
@@ -439,10 +474,10 @@ void wait_us( uint32_t us )
 void dmx_prime(void)
 {
     //Break
-    DMX_STATE = 0;
+    RED_LED = 0;                                // turn off TX LED since not transmitting during break and MAB
+    DMX_STATE = 0;                              // set dmx state to 0, the break state
     GPIO_PORTC_AFSEL_R  &= ~32;                 // clear 6th bit to disable peripheral control for PC5
     TIMER1_TAILR_R = 7040;                      // set Timer1A ILR to appropriate value for 176 us
-    DMX_DE = 0;                                 // drive DMX_DE low to enable transmission
     DMX_TX = 0;                                 // drive DMX_TX low to create break condition
     TIMER1_CTL_R |= TIMER_CTL_TAEN;             // turn on timer 1
 }
@@ -453,6 +488,7 @@ void init_dmx_tx(void)
     UART1_IM_R |= UART_IM_TXIM;                 //enable the TX interrupt mask to keep the tx buffer full
     UART1_IM_R &= ~UART_IM_RXIM                 //disable the RX interrupt mask for controller mode
                &  ~UART_IM_BEIM;                //disable the Break Error interrupt mask for controller mode
+    DMX_DE = 0;                                 // drive DMX_DE low to enable transmission
     dmx_prime();
 }
 
@@ -463,71 +499,6 @@ void init_dmx_rx(void)
                |  UART_IM_BEIM;                 //enable the Break Error interrupt mask to see breaks
     UART1_IM_R &= ~UART_IM_TXIM;                //disable the TX interrupt mask for Device mode
     DMX_DE = 1;                                 //drive DMX_DE high to disable transmission
-}
-
-//UART1 interrupt service routine, manages TX and RX fifos as well as break conditions in device mode
-void Uart1ISR(void) //TODO: add handling for UART error conditions
-{
-    //TRANSMIT FIFO LEVEL INTERRUPT -> fill TX fifo
-    if(UART1_MIS_R & UART_MIS_TXMIS)
-    {
-        while(!(UART1_FR_R & UART_FR_TXFF))                 // while TX fifo not full
-        {
-            UART1_DR_R = DMX_TX_DATA[(DMX_STATE++) - 2];    // fill the TX fifo from the dmx data buffer
-            if((DMX_STATE - 2) >= DMX_MAX )                 // when controller sends last dmx data
-            {
-                while(UART1_FR_R & UART_FR_BUSY);           // wait until transmission completes
-                UART1_ICR_R |= UART_ICR_TXIC;               // clear the TX interrupt
-                dmx_prime();                                // restart the dmx protocol
-                return;
-            }
-        }
-        UART1_ICR_R |= UART_ICR_TXIC;                       // clear the TX interrupt flag
-    }
-
-    //RECEIVE FIFO LEVEL INTERRUPT -> empty RX fifo
-    else if(UART1_MIS_R & UART_MIS_RXMIS)
-    {
-        while(!(UART1_FR_R & UART_FR_RXFE))                 // while RX fifo not empty
-        {
-            DMX_RX_BUFF[DMX_RX_INDEX++] = UART1_DR_R & 0xFF;// fill the receive buffer
-        }
-        UART1_ICR_R |= UART_ICR_RXIC;                       // clear the RX interrupt flag
-    }
-
-    //BREAK ERROR INTERRUPT -> empty RX fifo, clear receive buffer, update dmx data at listening address
-    if(UART1_MIS_R & UART_MIS_BEMIS)
-    {
-        while(!(UART1_FR_R & UART_FR_RXFE))                 // while RX fifo not empty
-        {
-            DMX_RX_BUFF[DMX_RX_INDEX++] = UART1_DR_R & 0xFF;// fill the receive buffer
-        }
-        DMX_RX_INDEX = 0;                                   // reset RX index b/c dmx protocol restarting
-        DMX_RX_DATA = DMX_RX_BUFF[ADDR];                    // update the dmx data at listening address
-        UART1_ICR_R |= UART_ICR_BEIC;                       // clear the BE interrupt flag
-    }
-}
-
-//TIMER1 interrupt service routine, handles priming the pump and starting uart for DMX transmission
-void Timer1ISR(void)
-{
-    if(DMX_STATE == 0)                              // state: 0->1 => BREAK->MAB
-    {
-        DMX_STATE = 1;                              // advance dmx512 state
-        TIMER1_TAILR_R = 480;                       // set Timer1A ILR to appropriate value for 12 us
-        DMX_TX = 1;                                 // drive DMX_TX high
-        TIMER1_CTL_R |= TIMER_CTL_TAEN;             // turn on timer 1
-    }
-    else if(DMX_STATE == 1)                         // state: 1->2 => MAB->UART TX
-    {
-        DMX_STATE = 2;                              // advance dmx512 state
-        GPIO_PORTC_AFSEL_R |= 32 | 16;              // set 5th and 6th bits to enable peripheral control for PC5 and PC4
-        GPIO_PORTC_PCTL_R  |= GPIO_PCTL_PC5_U1TX    // UART1 TX ON PC5
-                           |  GPIO_PCTL_PC4_U1RX;   // UART1 RX on PC4
-        UART1_CTL_R  |= UART_CTL_UARTEN             // enable UART1
-                     |  UART_CTL_TXE;               // enable UART1 transmission
-    }
-    TIMER1_ICR_R |= TIMER_ICR_TATOCINT;             // clear timer interrupt flag
 }
 
 //function that loads MODE and ADDR vars from EEPROM if they were saved
@@ -562,3 +533,103 @@ void save_mode_and_addr(void)
     EEPROM_EERDWR_R = EEPROM_STAT;          // write the EEPROM_STAT to the block and offset for EEPROM_STAT
 }
 
+void blink_rx_coms(void)
+{
+    GREEN_LED = 1;                          // turn on Green LED/ RX LED for 100us
+    TIMER2_CTL_R |= TIMER_CTL_TAEN;         // enable timer 2
+}
+
+//UART1 interrupt service routine, manages TX and RX fifos as well as break conditions in device mode
+void Uart1ISR(void) //TODO: add handling for UART error conditions
+{
+    //TRANSMIT FIFO LEVEL INTERRUPT -> fill TX fifo
+    if(UART1_MIS_R & UART_MIS_TXMIS)
+    {
+        while(!(UART1_FR_R & UART_FR_TXFF))                 // while TX fifo not full
+        {
+            UART1_DR_R = DMX_TX_DATA[(DMX_STATE++) - 2];    // fill the TX fifo from the dmx data buffer
+            if((DMX_STATE - 2) >= DMX_MAX )                 // when controller sends last dmx data
+            {
+                while(UART1_FR_R & UART_FR_BUSY);           // wait until transmission completes
+                UART1_ICR_R |= UART_ICR_TXIC;               // clear the TX interrupt
+                dmx_prime();                                // restart the dmx protocol
+                return;
+            }
+        }
+        UART1_ICR_R |= UART_ICR_TXIC;                       // clear the TX interrupt flag
+    }
+
+    //RECEIVE FIFO LEVEL INTERRUPT -> empty RX fifo
+    else if(UART1_MIS_R & UART_MIS_RXMIS)
+    {
+        GREEN_LED = 1;                                      // keep Green LED solid on while receiving regularly
+        RX_STATE = 1;
+        while(!(UART1_FR_R & UART_FR_RXFE))                 // while RX fifo not empty
+        {
+            DMX_RX_BUFF[DMX_RX_INDEX++] = UART1_DR_R & 0xFF;// fill the receive buffer
+        }
+        UART1_ICR_R |= UART_ICR_RXIC;                       // clear the RX interrupt flag
+    }
+
+    //BREAK ERROR INTERRUPT -> empty RX fifo, clear receive buffer, update dmx data at listening address
+    if(UART1_MIS_R & UART_MIS_BEMIS)
+    {
+        while(!(UART1_FR_R & UART_FR_RXFE))                 // while RX fifo not empty
+        {
+            DMX_RX_BUFF[DMX_RX_INDEX++] = UART1_DR_R & 0xFF;// fill the receive buffer
+        }
+        RX_STATE = 0;
+        TIMER3_CTL_R |= TIMER_CTL_TAEN;                     // turn on timer 3
+        DMX_RX_INDEX = 0;                                   // reset RX index b/c dmx protocol restarting
+        DMX_RX_DATA = DMX_RX_BUFF[ADDR];                    // update the dmx data at listening address
+        UART1_ICR_R |= UART_ICR_BEIC;                       // clear the BE interrupt flag
+    }
+}
+
+//TIMER1 interrupt service routine, handles priming the pump and starting uart for DMX transmission
+void Timer1ISR(void)
+{
+    TIMER1_ICR_R |= TIMER_ICR_TATOCINT;             // clear timer interrupt flag
+    if(DMX_STATE == 0)                              // state: 0->1 => BREAK->MAB
+    {
+        TIMER1_CTL_R &= ~TIMER_CTL_TAEN;            // turn off timer 1
+        DMX_STATE = 1;                              // advance dmx512 state
+        TIMER1_TAILR_R = 480;                       // set Timer1A ILR to appropriate value for 12 us
+        DMX_TX = 1;                                 // drive DMX_TX high to create Mark After Break condition
+        TIMER1_CTL_R |= TIMER_CTL_TAEN;             // turn on timer 1
+    }
+    else if(DMX_STATE == 1)                         // state: 1->2 => MAB->UART TX
+    {
+        TIMER1_CTL_R &= ~TIMER_CTL_TAEN;            // turn off timer 1
+        DMX_STATE = 2;                              // advance dmx512 state
+        GPIO_PORTC_AFSEL_R |= 32 | 16;              // set 5th and 6th bits to enable peripheral control for PC5 and PC4
+        GPIO_PORTC_PCTL_R  |= GPIO_PCTL_PC5_U1TX    // UART1 TX ON PC5
+                           |  GPIO_PCTL_PC4_U1RX;   // UART1 RX on PC4
+        RED_LED = 1;                                // turn on TX_LED during transmission
+        UART1_CTL_R  |= UART_CTL_UARTEN             // enable UART1
+                     |  UART_CTL_TXE;               // enable UART1 transmission
+    }
+}
+
+void Timer2ISR(void)
+{
+    TIMER2_CTL_R &= ~TIMER_CTL_TAEN;            // turn off timer 2
+    TIMER2_ICR_R |= TIMER_ICR_TATOCINT;         // clear timer interrupt flag
+    GREEN_LED = 0;                              //turn off RX LED/Green LED to complete 250 ms flash
+}
+
+void Timer3ISR(void)
+{
+    TIMER3_ICR_R |= TIMER_ICR_TATOCINT;         // clear timer interrupt flag
+    TIMER3_CTL_R &= ~TIMER_CTL_TAEN;            // turn off timer 3
+    if(RX_STATE){
+        TIMER3_TAILR_R = 80000000;              // set TIMER3 ILR to appropriate value for 2s = 80,000,000
+        GREEN_LED = 1;
+    }
+    else
+    {
+        TIMER3_TAILR_R = 40000000;                  // set TIMER3 ILR to appropriate value for 1s = 40,000,000
+        TIMER3_CTL_R |= TIMER_CTL_TAEN;        // turn on timer 3
+        GREEN_LED = !(GREEN_LED);
+    }
+}
