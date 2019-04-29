@@ -89,7 +89,7 @@ uint32_t RX_STATE = 0;
 bool TX_STATE;
 
 //controller mode globals
-unsigned char DMX_TX_DATA[513]; //stores values of DMX512 data to be transmitted
+unsigned char DMX_TX_DATA[513]={0}; //stores values of DMX512 data to be transmitted
 uint32_t DMX_MAX = 512;         //stores DMX max value
 uint32_t DMX_STATE = 0;         //global to control state of DMX512 Transmission algorithm
 
@@ -97,7 +97,7 @@ uint32_t DMX_STATE = 0;         //global to control state of DMX512 Transmission
 uint32_t DMX_RX_INDEX = 0;      //index of DMX512 receive buffer
 uint32_t ADDR = 0;              //stores dmx listening address
 unsigned char DMX_RX_DATA = 0;  //stores dmx data received at listening address
-unsigned char DMX_RX_BUFF[513]; //stores all received dmx data
+unsigned char DMX_RX_BUFF[513]={0}; //stores all received dmx data
 
 /*
  * MAIN PROGRAM
@@ -108,6 +108,7 @@ int main( void )
     init_hw();
     //save_to_eeprom(ADDR,ADDR_EEPROM_BLOCK,ADDR_EEPROM_OFFSET);
     recover_from_reset();
+    ADDR = ADDR%513;
     if(MODE == 'c')
         RX_STATE = 1;
     else
