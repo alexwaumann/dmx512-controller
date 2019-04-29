@@ -35,9 +35,9 @@
 
 //EEPROM addresses
 #define MODE_EEPROM_BLOCK   0
-#define MODE_EEPROM_OFFSET    0
-#define ADDR_EEPROM_BLOCK   1
-#define ADDR_EEPROM_OFFSET    0
+#define MODE_EEPROM_OFFSET  0
+#define ADDR_EEPROM_BLOCK   0
+#define ADDR_EEPROM_OFFSET  1
 
 /*
  * FUNCTION DECLARATIONS
@@ -106,7 +106,7 @@ unsigned char DMX_RX_BUFF[513]={0}; //stores all received dmx data
 int main( void )
 {
     init_hw();
-    //save_to_eeprom(ADDR,ADDR_EEPROM_BLOCK,ADDR_EEPROM_OFFSET);
+    save_to_eeprom(ADDR,ADDR_EEPROM_BLOCK,ADDR_EEPROM_OFFSET);
     recover_from_reset();
     ADDR = ADDR%513;
     if(MODE == 'c')
@@ -729,7 +729,7 @@ void recover_from_reset(void)
     if(EEPROM_STAT)                           // if the EEPROM has been saved to
     {
         MODE = read_from_eeprom(MODE_EEPROM_BLOCK,MODE_EEPROM_OFFSET) & 0xFF;   // read the MODE from the block and offset for MODE
-        ADDR = read_from_eeprom(ADDR_EEPROM_BLOCK,ADDR_EEPROM_OFFSET);          // read the ADDR from the block and offset for ADDR
+        ADDR = read_from_eeprom(ADDR_EEPROM_BLOCK,ADDR_EEPROM_OFFSET) & 0x2FF;   // read the ADDR from the block and offset for ADDR
     }
 }
 
@@ -746,6 +746,7 @@ uint32_t read_from_eeprom(uint32_t block,uint32_t offset)
 {
     EEPROM_EEBLOCK_R = block;
     EEPROM_EEOFFSET_R = offset;
+    wait_us(1);
     uint32_t data = EEPROM_EERDWR_R;
     return data;
 }
