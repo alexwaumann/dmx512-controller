@@ -30,11 +30,9 @@
 
 //EEPROM addresses
 #define MODE_EEPROM_BLOCK   0
-#define MODE_EEPROM_WORD    0
+#define MODE_EEPROM_OFFSET    0
 #define ADDR_EEPROM_BLOCK   1
-#define ADDR_EEPROM_WORD    0
-#define EEPROM_STAT_BLOCK   2
-#define EEPROM_STAT_WORD    0
+#define ADDR_EEPROM_OFFSET    0
 
 /*
  * FUNCTION DECLARATIONS
@@ -71,7 +69,8 @@ void dmx_prime(void);
 void init_dmx_tx(void);
 void init_dmx_rx(void);
 void recover_from_reset(void);
-void save_mode_and_addr(void);
+void save_to_eeprom(uint32_t data,uint32_t block,uint32_t offset);
+uint32_t read_from_eeprom(uint32_t block,uint32_t offset);
 
 char *sprint_int(uint32_t num);
 
@@ -94,7 +93,6 @@ uint32_t ADDR = 0;              //stores dmx listening address
 unsigned char DMX_RX_DATA = 0;  //stores dmx data received at listening address
 unsigned char DMX_RX_BUFF[513]; //stores all received dmx data
 
-
 /*
  * MAIN PROGRAM
  */
@@ -102,12 +100,12 @@ unsigned char DMX_RX_BUFF[513]; //stores all received dmx data
 int main( void )
 {
     init_hw();
+    //save_to_eeprom(ADDR,ADDR_EEPROM_BLOCK,ADDR_EEPROM_OFFSET);
     recover_from_reset();
     if(MODE == 'c')
         cmd_controller();
     else
         cmd_device();
-
     while( true )
     {
         char cmd_str[MAX_CMD_SIZE] = {'\0'};
@@ -183,15 +181,6 @@ void init_eeprom(void)
     wait_us( 1 );
     while( EEPROM_EEDONE_R & EEPROM_EEDONE_WORKING );
     if( EEPROM_EESUPP_R & (EEPROM_EESUPP_PRETRY | EEPROM_EESUPP_ERETRY) );
-
-    SYSCTL_RCGCTIMER_R |= SYSCTL_RCGCTIMER_R4;  // turn on timer 4
-    TIMER4_CTL_R &= ~TIMER_CTL_TAEN;            // turn off timer before configuring
-    TIMER4_CFG_R = TIMER_CFG_32_BIT_TIMER;      // configure as 32-bit timer (concatenated)
-    TIMER4_TAMR_R = TIMER_TAMR_TAMR_1_SHOT;     // configure in one-shot mode (count down)
-    TIMER4_IMR_R = TIMER_IMR_TATOIM;            // turn on timer4 interrupt
-    TIMER4_TAILR_R = 400000000;                 // set TIMER3 ILR to value for 10s
-    NVIC_EN2_R |= 1 << (INT_TIMER4A - 80);      // turn on interrupt 86 (TIMER4A)
-    TIMER4_CTL_R |= TIMER_CTL_TAEN;             // start Timer 4
 }
 
 /*
@@ -456,15 +445,19 @@ void run_cmd( uint8_t argc, char argv[MAX_ARG_COUNT][MAX_WORD_SIZE] )
 
 void cmd_device()
 {
+    cmd_off();
     MODE = 'd';
+    save_to_eeprom(MODE,MODE_EEPROM_BLOCK,MODE_EEPROM_OFFSET);
     init_dmx_rx();
     GREEN_LED = 0;
     RED_LED = 0;
+    RX_STATE = 0;
 }
 
 void cmd_controller()
 {
     MODE = 'c';
+    save_to_eeprom(MODE,MODE_EEPROM_BLOCK,MODE_EEPROM_OFFSET);
     RX_STATE = 1;
     GREEN_LED = 0;
     RED_LED = 0;
@@ -536,11 +529,12 @@ void dmx_prime(void)
 //function that starts transmitting dmx data
 void init_dmx_tx(void)
 {
-    UART1_CTL_R &= ~UART_CTL_UARTEN;// disable UART to program
+    UART1_CTL_R &= ~UART_CTL_UARTEN // disable UART to program
+                &  ~UART_CTL_RXE;
     UART1_IM_R |= UART_IM_TXIM;     // enable the TX interrupt mask to keep the tx buffer full
     UART1_IM_R &= ~UART_IM_RXIM     // disable the RX interrupt mask for controller mode
                &  ~UART_IM_BEIM;    // disable the Break Error interrupt mask for controller mode
-    DMX_DE = 0;                     // drive DMX_DE low to enable transmission
+    DMX_DE = 1;                     // drive DMX_DE low to enable transmission
     dmx_prime();                    // prime the pump for DMX512 alg
 }
 
@@ -551,41 +545,38 @@ void init_dmx_rx(void)
     UART1_IM_R |= UART_IM_RXIM                  // enable the RX interrupt mask to keep the RX buffer not full
                |  UART_IM_BEIM;                 // enable the Break Error interrupt mask to see breaks
     UART1_IM_R &= ~UART_IM_TXIM;                // disable the TX interrupt mask for Device mode
+    UART1_CTL_R &= ~UART_CTL_TXE;
     UART1_CTL_R |= UART_CTL_UARTEN              // start UART1
                 |  UART_CTL_RXE;                // enable UART1 Receiving
-    DMX_DE = 1;                                 // drive DMX_DE high to disable transmission
+    DMX_DE = 0;                                 // drive DMX_DE high to disable transmission
 }
 
 //function that loads MODE and ADDR vars from EEPROM if they were saved
 void recover_from_reset(void)
 {
-    EEPROM_EEBLOCK_R = EEPROM_STAT_BLOCK;     // set EEBLOCK to the block for EEPROM_STAT
-    EEPROM_EEOFFSET_R = EEPROM_STAT_WORD;     // set EEOFFSET to the offset for EEPROM_STAT
-    EEPROM_STAT = EEPROM_EERDWR_R;            // read the EEPROM_STAT from the block and offset for EEPROM_STAT
+    EEPROM_STAT = read_from_eeprom(MODE_EEPROM_BLOCK,MODE_EEPROM_OFFSET);//if not zero, EEPROM has been written to
     if(EEPROM_STAT)                           // if the EEPROM has been saved to
     {
-        EEPROM_EEBLOCK_R = MODE_EEPROM_BLOCK; // set EEBLOCK to the block for MODE
-        EEPROM_EEOFFSET_R = MODE_EEPROM_WORD; // set EEOFFSET to the offset for MODE
-        MODE = EEPROM_EERDWR_R & 0xFF;        // read the MODE from the block and offset for MODE
-        EEPROM_EEBLOCK_R = ADDR_EEPROM_BLOCK; // set EEBLOCK to the block for ADDR
-        EEPROM_EEOFFSET_R = ADDR_EEPROM_WORD; // set EEOFFSET to the offset for ADDR
-        ADDR = EEPROM_EERDWR_R;               // read the ADDR from the block and offset for ADDR
+        MODE = read_from_eeprom(MODE_EEPROM_BLOCK,MODE_EEPROM_OFFSET) & 0xFF;   // read the MODE from the block and offset for MODE
+        ADDR = read_from_eeprom(ADDR_EEPROM_BLOCK,ADDR_EEPROM_OFFSET);          // read the ADDR from the block and offset for ADDR
     }
 }
 
-//function that saves MODE and ADDR to EEPROM and sets the EEPROM_STAT flag and saves it too
-void save_mode_and_addr(void)
+//function that saves to EEPROM
+void save_to_eeprom(uint32_t data,uint32_t block,uint32_t offset)
 {
-    EEPROM_EEBLOCK_R = MODE_EEPROM_BLOCK;   // set EEBLOCK to the block for MODE
-    EEPROM_EEOFFSET_R = MODE_EEPROM_WORD;   // set EEOFFSET to the offset for MODE
-    EEPROM_EERDWR_R = MODE;                 // write the MODE to the block and offset for MODE
-    EEPROM_EEBLOCK_R = ADDR_EEPROM_BLOCK;   // set EEBLOCK to the block for ADDR
-    EEPROM_EEOFFSET_R = ADDR_EEPROM_WORD;   // set EEOFFSET to the offset for ADDR
-    EEPROM_EERDWR_R = ADDR;                 // write the ADDR to the block and offset for ADDR
-    EEPROM_STAT = 1;                        // set the status of EEPROM storage to true
-    EEPROM_EEBLOCK_R = EEPROM_STAT_BLOCK;   // set EEBLOCK to the block for EEPROM_STAT
-    EEPROM_EEOFFSET_R = EEPROM_STAT_WORD;   // set EEOFFSET to the offset for EEPROM_STAT
-    EEPROM_EERDWR_R = EEPROM_STAT;          // write the EEPROM_STAT to the block and offset for EEPROM_STAT
+    EEPROM_EEBLOCK_R = block;
+    EEPROM_EEOFFSET_R = offset;
+    EEPROM_EERDWR_R = data;
+}
+
+//function that reads from EEPROM
+uint32_t read_from_eeprom(uint32_t block,uint32_t offset)
+{
+    EEPROM_EEBLOCK_R = block;
+    EEPROM_EEOFFSET_R = offset;
+    uint32_t data = EEPROM_EERDWR_R;
+    return data;
 }
 
 //UART1 interrupt service routine, manages TX and RX fifos as well as break conditions in device mode
@@ -613,12 +604,11 @@ void Uart1ISR(void) //TODO: add handling for UART error conditions
     {
         GREEN_LED = 1;                                      // keep Green LED solid on while receiving regularly
         RX_STATE = 1;
-        while(!(UART1_FR_R & UART_FR_RXFE))                 // while RX fifo not empty
+        while(!(UART1_FR_R & UART_FR_RXFE) && (DMX_RX_INDEX <= 513))                 // while RX fifo not empty
         {
             DMX_RX_BUFF[DMX_RX_INDEX] = UART1_DR_R & 0xFF;  // fill the receive buffer
-            if(DMX_RX_INDEX == ADDR)
-                DMX_RX_DATA = DMX_RX_BUFF[ADDR];            // update the dmx data at listening address
-            DMX_RX_INDEX++;
+            if(DMX_RX_BUFF[0] == 0)
+                DMX_RX_INDEX++;
         }
         UART1_ICR_R |= UART_ICR_RXIC;                       // clear the RX interrupt flag
     }
@@ -628,11 +618,10 @@ void Uart1ISR(void) //TODO: add handling for UART error conditions
     {
         while(!(UART1_FR_R & UART_FR_RXFE))                 // while RX fifo not empty
         {
-            DMX_RX_BUFF[DMX_RX_INDEX] = UART1_DR_R & 0xFF;  // fill the receive buffer
-            if(DMX_RX_INDEX == ADDR)
-                DMX_RX_DATA = DMX_RX_BUFF[ADDR];            // update the dmx data at listening address
-            DMX_RX_INDEX++;
+            DMX_RX_BUFF[DMX_RX_INDEX++] = UART1_DR_R & 0xFF;  // fill the receive buffer
+
         }
+        DMX_RX_DATA = DMX_RX_BUFF[ADDR];            // update the dmx data at listening address
         RX_STATE = 0;
         TIMER3_CTL_R |= TIMER_CTL_TAEN;                     // turn on timer 3
         DMX_RX_INDEX = 0;                                   // reset RX index b/c dmx protocol restarting
@@ -684,7 +673,6 @@ void Timer3ISR(void)
     TIMER3_CTL_R &= ~TIMER_CTL_TAEN;    // turn off timer 3
     if(RX_STATE){
         TIMER3_TAILR_R = 80000000;      // set TIMER3 ILR to appropriate value for 2s = 80,000,000
-        GREEN_LED = 1;                  // turn on the Green LED because receiving has begun again
     }
     else
     {
@@ -692,11 +680,4 @@ void Timer3ISR(void)
         TIMER3_CTL_R |= TIMER_CTL_TAEN; // turn on timer 3
         GREEN_LED = !(GREEN_LED);       // toggle the Green LED
     }
-}
-
-//TIMER4 interrupt service routine, handles intermittently saving the MODE and ADDR vars to EEPROM
-void Timer4ISR(void)
-{
-    TIMER4_ICR_R |= TIMER_ICR_TATOCINT; // clear timer interrupt flag
-    save_mode_and_addr();               // save MODE and ADDR
 }

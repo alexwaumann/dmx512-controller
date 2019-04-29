@@ -36,7 +36,6 @@ static void IntDefaultHandler(void);
 void Timer1ISR(void);
 void Timer2ISR(void);
 void Timer3ISR(void);
-void Timer4ISR(void);
 void Uart1ISR(void);
 
 //*****************************************************************************
@@ -158,7 +157,7 @@ void (* const g_pfnVectors[])(void) =
     0,                                      // Reserved
     IntDefaultHandler,                      // I2C2 Master and Slave
     IntDefaultHandler,                      // I2C3 Master and Slave
-    Timer4ISR,                      // Timer 4 subtimer A
+    IntDefaultHandler,                      // Timer 4 subtimer A
     IntDefaultHandler,                      // Timer 4 subtimer B
     0,                                      // Reserved
     0,                                      // Reserved
