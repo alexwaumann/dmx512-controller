@@ -84,6 +84,7 @@ char *sprint_int(uint32_t num);
 char MODE = 'c';                //tracks whether in controller ('c') or device mode ('d')
 uint32_t EEPROM_STAT = 0;      //if 0 EEPROM was never written, else the MODE and ADDR have been stored
 uint32_t RX_STATE = 0;
+bool TX_STATE;
 
 //controller mode globals
 unsigned char DMX_TX_DATA[513]; //stores values of DMX512 data to be transmitted
@@ -450,7 +451,7 @@ void cmd_device()
 {
     uart_putstr( "current mode: " );
 
-    if( dmx_mode == DEVICE_MODE )
+    if( MODE == DEVICE_MODE )
     {
         uart_putstr( "device\n\r" );
         uart_putstr( "no action taken\n\r" );
@@ -473,7 +474,7 @@ void cmd_controller()
 {
     uart_putstr( "current mode: " );
 
-    if( dmx_mode == CONTROLLER_MODE )
+    if( MODE == CONTROLLER_MODE )
     {
         uart_putstr( "controller\n\r" );
         uart_putstr( "no action taken\n\r" );
@@ -494,7 +495,7 @@ void cmd_clear()
 {
     uint16_t i;
 
-    if( dmx_mode != CONTROLLER_MODE )
+    if( MODE != CONTROLLER_MODE )
     {
         uart_putstr( "error: not in controller mode\n\r" );
         return;
@@ -578,7 +579,7 @@ void cmd_get( uint8_t argc, char argv[MAX_ARG_COUNT][MAX_WORD_SIZE] )
 
 void cmd_on()
 {
-    if( dmx_mode != CONTROLLER_MODE )
+    if( MODE != CONTROLLER_MODE )
     {
         uart_putstr( "error: not in controller mode\n\r" );
         return;
@@ -586,7 +587,7 @@ void cmd_on()
 
     uart_putstr( "current dmx transmit state: " );
 
-    if( dmx_transmit_state )
+    if( TX_STATE )
     {
         uart_putstr( "on\n\r" );
         uart_putstr( "no action taken\n\r" );
@@ -594,7 +595,7 @@ void cmd_on()
     else
     {
         uart_putstr( "off\n\r" );
-        dmx_transmit_state = true;
+        TX_STATE = true;
         init_dmx_tx();
         uart_putstr( "new dmx transmit state: on\n\r" );
     }
@@ -602,7 +603,7 @@ void cmd_on()
 
 void cmd_off()
 {
-    if( dmx_mode != CONTROLLER_MODE )
+    if( MODE != CONTROLLER_MODE )
     {
         uart_putstr( "error: not in controller mode\n\r" );
         return;
@@ -610,7 +611,7 @@ void cmd_off()
 
     uart_putstr( "current dmx transmit state: " );
 
-    if( !dmx_transmit_state )
+    if( !TX_STATE )
     {
         uart_putstr( "off\n\r" );
         uart_putstr( "no action taken\n\r" );
@@ -618,7 +619,7 @@ void cmd_off()
     else
     {
         uart_putstr( "on\n\r" );
-        dmx_transmit_state = false;
+        TX_STATE = false;
         UART1_CTL_R &= ~UART_CTL_UARTEN;
         RED_LED = 0;
         uart_putstr( "new dmx transmit state: off\n\r" );
