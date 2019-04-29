@@ -107,9 +107,12 @@ int main( void )
     //save_to_eeprom(ADDR,ADDR_EEPROM_BLOCK,ADDR_EEPROM_OFFSET);
     recover_from_reset();
     if(MODE == 'c')
-        cmd_controller();
+        RX_STATE = 1;
     else
-        cmd_device();
+        init_dmx_rx();
+    RED_LED = 0;
+    GREEN_LED = 0;
+
     while( true )
     {
         char cmd_str[MAX_CMD_SIZE] = {'\0'};
