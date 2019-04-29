@@ -28,6 +28,7 @@
 //Bit-Banded defines
 #define RED_LED      (*((volatile uint32_t *)(0x42000000 + (0x400253FC-0x40000000)*32 + 1*4)))
 #define GREEN_LED    (*((volatile uint32_t *)(0x42000000 + (0x400253FC-0x40000000)*32 + 3*4)))
+#define BLUE_LED     (*((volatile uint32_t *)(0x42000000 + (0x400253FC-0x40000000)*32 + 2*4)))
 #define DMX_TX       (*((volatile uint32_t *)(0x42000000 + (0x400063FC-0x40000000)*32 + 5*4)))
 #define DMX_DE       (*((volatile uint32_t *)(0x42000000 + (0x400063FC-0x40000000)*32 + 6*4)))
 
@@ -148,8 +149,8 @@ void init_leds( void )
 {
     SYSCTL_RCGC2_R |= SYSCTL_RCGC2_GPIOF;
 
-    GPIO_PORTF_DIR_R = GREEN_LED_MASK | RED_LED_MASK;
-    GPIO_PORTF_DEN_R = GREEN_LED_MASK | RED_LED_MASK;
+    GPIO_PORTF_DIR_R = GREEN_LED_MASK | RED_LED_MASK | BLUE_LED_MASK;
+    GPIO_PORTF_DEN_R = GREEN_LED_MASK | RED_LED_MASK | BLUE_LED_MASK;
 }
 
 /**/
