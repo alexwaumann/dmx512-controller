@@ -473,10 +473,74 @@ void cmd_clear()
 
 void cmd_set( uint8_t argc, char argv[MAX_ARG_COUNT][MAX_WORD_SIZE] )
 {
+    uint32_t address;
+    uint32_t value;
+
+    if( dmx_mode != CONTROLLER_MODE )
+    {
+        uart_putstr( "error: not in controller mode\n\r" );
+        return;
+    }
+
+    if( argc != 3 )
+    {
+        uart_putstr( "error: expected 3 arguments, got " );
+        uart_putc( argc + 48 );
+        uart_putstr( "\n\r" );
+        return;
+    }
+
+    address = atoi( argv[1] );
+    value   = atoi( argv[2] );
+
+    if( address > 512 || address < 1 )
+    {
+        uart_putstr( "error: address must be in the range [1, 512]\n\r" );
+        return;
+    }
+
+    if( value > 255 || value < 0 )
+    {
+        uart_putstr( "error: value must be in the range [0, 255]\n\r" );
+        return;
+    }
+
+    dmx_data[address] = (uint8_t)value;
 }
 
 void cmd_get( uint8_t argc, char argv[MAX_ARG_COUNT][MAX_WORD_SIZE] )
 {
+    uint32_t address;
+    uint8_t  value;
+
+    if( dmx_mode != CONTROLLER_MODE )
+    {
+        uart_putstr( "error: not in controller mode\n\r" );
+        return;
+    }
+
+    if( argc != 2 )
+    {
+        uart_putstr( "error: expected 2 arguments, got " );
+        uart_putc( argc + 48 );
+        uart_putstr( "\n\r" );
+        return;
+    }
+
+    address = atoi( argv[1] );
+
+    if( address > 512 || address < 1 )
+    {
+        uart_putstr( "error: address must be in the range [1, 512]\n\r" );
+        return;
+    }
+
+    value = dmx_data[address];
+    uart_putstr( "value at address " );
+    // print address
+    uart_putstr( ": " );
+    // print value
+    uart_putstr( "\n\r" );
 }
 
 void cmd_on()
@@ -494,6 +558,37 @@ void cmd_off()
 
 void cmd_max( uint8_t argc, char argv[MAX_ARG_COUNT][MAX_WORD_SIZE] )
 {
+    uint32_t max_addr;
+
+    if( dmx_mode != CONTROLLER_MODE )
+    {
+        uart_putstr( "error: not in controller mode\n\r" );
+        return;
+    }
+
+    if( argc != 2 )
+    {
+        uart_putstr( "error: expected 2 arguments, got " );
+        uart_putc( argc + 48 );
+        uart_putstr( "\n\r" );
+        return;
+    }
+
+    max_addr = atoi( argv[1] );
+
+    if( max_addr > 512 || max_addr < 1 )
+    {
+        uart_putstr( "error: max address must be in the range [1, 512]\n\r" );
+        return;
+    }
+
+    uart_putstr( "current max address: " );
+    // print current max
+    uart_putstr( "\n\r" );
+    dmx_max_addr = (uint16_t)max_addr;
+    uart_putstr( "new max address: " );
+    // print new max
+    uart_putstr( "\n\r" );
 }
 
 void cmd_address( uint8_t argc, char argv[MAX_ARG_COUNT][MAX_WORD_SIZE] )
