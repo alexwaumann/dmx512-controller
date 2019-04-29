@@ -23,8 +23,8 @@
 #define PC5_MASK 32
 
 //Bit-Banded defines
-#define RED_LED      (*((volatile uint32_t *)(0x42000000 + (0x400253FC-0x40000000)*32 + 1*4))) //TX LED
-#define GREEN_LED    (*((volatile uint32_t *)(0x42000000 + (0x400253FC-0x40000000)*32 + 3*4))) //RX LED
+#define RED_LED      (*((volatile uint32_t *)(0x42000000 + (0x400253FC-0x40000000)*32 + 1*4)))
+#define GREEN_LED    (*((volatile uint32_t *)(0x42000000 + (0x400253FC-0x40000000)*32 + 3*4)))
 #define DMX_TX       (*((volatile uint32_t *)(0x42000000 + (0x400063FC-0x40000000)*32 + 5*4)))
 #define DMX_DE       (*((volatile uint32_t *)(0x42000000 + (0x400063FC-0x40000000)*32 + 6*4)))
 
@@ -70,14 +70,15 @@ void wait_us( uint32_t us );
 void dmx_prime(void);
 void init_dmx_tx(void);
 void init_dmx_rx(void);
-void blink_rx_coms(void);
+void recover_from_reset(void);
+void save_mode_and_addr(void);
 
 /*
  * GLOBAL VARIABLES
  */
 
 char MODE = 'c';                //tracks whether in controller ('c') or device mode ('d')
-unint32_t EEPROM_STAT = 0;      //if 0 EEPROM was never written, else the MODE and ADDR have been stored
+uint32_t EEPROM_STAT = 0;      //if 0 EEPROM was never written, else the MODE and ADDR have been stored
 uint32_t RX_STATE = 0;
 
 //controller mode globals
@@ -91,6 +92,7 @@ uint32_t ADDR = 0;              //stores dmx listening address
 unsigned char DMX_RX_DATA = 0;  //stores dmx data received at listening address
 unsigned char DMX_RX_BUFF[513]; //stores all received dmx data
 
+
 /*
  * MAIN PROGRAM
  */
@@ -100,6 +102,11 @@ int main( void )
     init_hw();
     RED_LED = 0;
     GREEN_LED = 0;
+    //recover_from_reset();
+    if(MODE == 'c')
+        cmd_controller();
+    else
+        cmd_device();
 
     while( true )
     {
@@ -157,7 +164,7 @@ void init_timer_led_blink( void )
     TIMER3_TAMR_R = TIMER_TAMR_TAMR_1_SHOT;     // configure in one-shot mode (count down)
     TIMER3_IMR_R = TIMER_IMR_TATOIM;            // turn on timer3 interrupt
     TIMER3_TAILR_R = 80000000;                  // set TIMER3 ILR to appropriate value for 2s = 80,000,000
-    NVIC_EN1_R |= 1 << (INT_TIMER3A - 16);      // turn on interrupt 51 (TIMER2A)
+    NVIC_EN1_R |= 1 << (INT_TIMER3A - 48);      // turn on interrupt 51 (TIMER2A)
 }
 
 /*
@@ -219,8 +226,12 @@ void init_uart_coms( void )
 //function that configures the UART, GPIO, and TIMER for DMX512
 void init_dmx_hw( void )
 {
+    //Clock Gating Control regs
+    SYSCTL_RCGC2_R |= SYSCTL_RCGC2_GPIOC;       // enable PORTC module
+    SYSCTL_RCGCUART_R  |= SYSCTL_RCGCUART_R1;   // enable UART1 module
+    SYSCTL_RCGCTIMER_R |= SYSCTL_RCGCTIMER_R1;  // turn on timer
+
     //GPIO PORTC :: for DMX-512
-    SYSCTL_RCGCGPIO_R  |= SYSCTL_RCGCGPIO_R2;   // enable PORTC module
     GPIO_PORTC_DIR_R    |= 64 | 32;             // set PC5 direction as output
     GPIO_PORTC_DEN_R    |= 64 | 32 | 16;        // set PC5/DMX_TX and PC4 as digital I/O
     GPIO_PORTC_ODR_R    &= ~112;                // set PC5 and PC4 ODR to 0
@@ -231,20 +242,18 @@ void init_dmx_hw( void )
     uint8_t  brf  = (int) ((brd - (float) bri) * 64.0f + 0.5f);
              brf &= 0x3F;                       // only need bottom 6 bits
 
-    SYSCTL_RCGCUART_R  |= SYSCTL_RCGCUART_R1;   // enable UART1 module
-    UART1_CTL_R  &= ~UART_CTL_UARTEN;           // disable UART1 for configuration
+    UART1_CTL_R &= ~UART_CTL_UARTEN;           // disable UART1 for configuration
     UART1_IBRD_R |= bri;                        // baud rate divisor integer part
     UART1_FBRD_R |= brf;                        // baud rate divisor fractional part
     UART1_LCRH_R |= UART_LCRH_WLEN_8            // 8-bit data frame
                  |  UART_LCRH_STP2              // 2 stop-bits
                  |  UART_LCRH_FEN;              // enable transmit and receive FIFOs
     UART1_CC_R    = UART_CC_CS_SYSCLK;          // use system clock
-    UART1_IFLS_R |= UART_IFLS_TX1_8             // set TX interrupt to go off when TX FIFO is 1/8th full
-                 |  UART_IFLS_RX7_8;            // set RX interrupt to go off when RX FIFO is 7/8th full
+    //UART1_IFLS_R =  UART_IFLS_TX1_8             // set TX interrupt to go off when TX FIFO is 1/8th full
+    //             |  UART_IFLS_RX7_8;            // set RX interrupt to go off when RX FIFO is 7/8th full
     NVIC_EN0_R |= 1 << (INT_UART1 - 16);        // turn on interrupt 22 (UART1)
 
     //TIMER1 :: for DMX-512 Break and MAB
-    SYSCTL_RCGCTIMER_R |= SYSCTL_RCGCTIMER_R1;  // turn on timer
     TIMER1_CTL_R &= ~TIMER_CTL_TAEN;            // turn off timer before configuring
     TIMER1_CFG_R = TIMER_CFG_32_BIT_TIMER;      // configure as 32-bit timer (concatenated)
     TIMER1_TAMR_R = TIMER_TAMR_TAMR_1_SHOT;     // configure in one-shot mode (count down)
@@ -283,11 +292,7 @@ void uart_putstr( char *str )
 char uart_getc()
 {
     while( UART0_FR_R & UART_FR_RXFE );
-    if(MODE == 'c')
-    {
-        GREEN_LED = 1;                          // turn on Green LED/ RX LED for 250ms
-        TIMER2_CTL_R |= TIMER_CTL_TAEN;         // enable timer 2 to flash it
-    }
+
     return UART0_DR_R & 0xFF;
 }
 
@@ -333,7 +338,11 @@ uint8_t get_cmd( char cmd[MAX_CMD_SIZE] )
             ++word_idx;
         }
     }
-
+    if(MODE == 'c')
+    {
+        GREEN_LED = 1;                          // turn on Green LED/ RX LED for 250ms
+        TIMER2_CTL_R |= TIMER_CTL_TAEN;         // enable timer 2 to flash it
+    }
     uart_putstr( "\n\r" );
     cmd[cmd_idx] = '\0';
 
@@ -421,18 +430,22 @@ void run_cmd( uint8_t argc, char argv[MAX_ARG_COUNT][MAX_WORD_SIZE] )
 
 void cmd_device()
 {
+    MODE = 'd';
+    init_dmx_rx();
 }
 
 void cmd_controller()
 {
+    MODE = 'c';
+    RX_STATE = 1;
 }
 
 void cmd_clear()
 {
     uint16_t i;
 
-    for( i = 1; i <= max_address; ++i )
-        dmx_data[i] = 0;
+    for( i = 1; i <= DMX_MAX; ++i )
+        DMX_TX_DATA[i] = 0;
 }
 
 void cmd_set( uint8_t argc, char argv[MAX_ARG_COUNT][MAX_WORD_SIZE] )
@@ -445,10 +458,15 @@ void cmd_get( uint8_t argc, char argv[MAX_ARG_COUNT][MAX_WORD_SIZE] )
 
 void cmd_on()
 {
+    if(MODE == 'c')
+        init_dmx_tx();
 }
 
 void cmd_off()
 {
+    if(MODE == 'c')
+        UART1_CTL_R &= ~UART_CTL_UARTEN;
+    RED_LED = 0;
 }
 
 void cmd_max( uint8_t argc, char argv[MAX_ARG_COUNT][MAX_WORD_SIZE] )
@@ -488,6 +506,7 @@ void dmx_prime(void)
 //function that starts transmitting dmx data
 void init_dmx_tx(void)
 {
+    UART1_CTL_R &= ~UART_CTL_UARTEN;
     UART1_IM_R |= UART_IM_TXIM;                 //enable the TX interrupt mask to keep the tx buffer full
     UART1_IM_R &= ~UART_IM_RXIM                 //disable the RX interrupt mask for controller mode
                &  ~UART_IM_BEIM;                //disable the Break Error interrupt mask for controller mode
@@ -498,9 +517,12 @@ void init_dmx_tx(void)
 //function that starts receiving dmx data
 void init_dmx_rx(void)
 {
+    UART1_CTL_R &= ~UART_CTL_UARTEN;
     UART1_IM_R |= UART_IM_RXIM                  //enable the RX interrupt mask to keep the RX buffer not full
                |  UART_IM_BEIM;                 //enable the Break Error interrupt mask to see breaks
     UART1_IM_R &= ~UART_IM_TXIM;                //disable the TX interrupt mask for Device mode
+    UART1_CTL_R |= UART_CTL_UARTEN
+                |  UART_CTL_RXE;
     DMX_DE = 1;                                 //drive DMX_DE high to disable transmission
 }
 
@@ -534,12 +556,6 @@ void save_mode_and_addr(void)
     EEPROM_EEBLOCK_R = EEPROM_STAT_BLOCK;   // set EEBLOCK to the block for EEPROM_STAT
     EEPROM_EEOFFSET_R = EEPROM_STAT_WORD;   // set EEOFFSET to the offset for EEPROM_STAT
     EEPROM_EERDWR_R = EEPROM_STAT;          // write the EEPROM_STAT to the block and offset for EEPROM_STAT
-}
-
-void blink_rx_coms(void)
-{
-    GREEN_LED = 1;                          // turn on Green LED/ RX LED for 100us
-    TIMER2_CTL_R |= TIMER_CTL_TAEN;         // enable timer 2
 }
 
 //UART1 interrupt service routine, manages TX and RX fifos as well as break conditions in device mode
@@ -616,6 +632,10 @@ void Timer1ISR(void)
         RED_LED = 1;                                // turn on TX_LED during transmission
         UART1_CTL_R  |= UART_CTL_UARTEN             // enable UART1
                      |  UART_CTL_TXE;               // enable UART1 transmission
+        while(!(UART1_FR_R & UART_FR_TXFF))                 // while TX fifo not full
+        {
+            UART1_DR_R = DMX_TX_DATA[(DMX_STATE++) - 2];    // fill the TX fifo from the dmx data buffer
+        }
     }
 }
 

@@ -34,6 +34,8 @@ static void NmiSR(void);
 static void FaultISR(void);
 static void IntDefaultHandler(void);
 void Timer1ISR(void);
+void Timer2ISR(void);
+void Timer3ISR(void);
 void Uart1ISR(void);
 
 //*****************************************************************************
