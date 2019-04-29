@@ -448,27 +448,57 @@ void run_cmd( uint8_t argc, char argv[MAX_ARG_COUNT][MAX_WORD_SIZE] )
 
 void cmd_device()
 {
-    //cmd_off();
-    MODE = 'd';
-    save_to_eeprom(MODE,MODE_EEPROM_BLOCK,MODE_EEPROM_OFFSET);
-    init_dmx_rx();
-    GREEN_LED = 0;
-    RED_LED = 0;
-    //RX_STATE = 0;
+    uart_putstr( "current mode: " );
+
+    if( dmx_mode == DEVICE_MODE )
+    {
+        uart_putstr( "device\n\r" );
+        uart_putstr( "no action taken\n\r" );
+    }
+    else
+    {
+        uart_putstr( "controller\n\r" );
+        //cmd_off();
+        MODE = 'd';
+        save_to_eeprom(MODE,MODE_EEPROM_BLOCK,MODE_EEPROM_OFFSET);
+        init_dmx_rx();
+        GREEN_LED = 0;
+        RED_LED = 0;
+        //RX_STATE = 0;
+        uart_putstr( "new mode: device\n\r" );
+    }
 }
 
 void cmd_controller()
 {
-    MODE = 'c';
-    save_to_eeprom(MODE,MODE_EEPROM_BLOCK,MODE_EEPROM_OFFSET);
-    RX_STATE = 1;
-    GREEN_LED = 0;
-    RED_LED = 0;
+    uart_putstr( "current mode: " );
+
+    if( dmx_mode == CONTROLLER_MODE )
+    {
+        uart_putstr( "controller\n\r" );
+        uart_putstr( "no action taken\n\r" );
+    }
+    else
+    {
+        uart_putstr( "device\n\r" );
+        MODE = 'c';
+        save_to_eeprom(MODE,MODE_EEPROM_BLOCK,MODE_EEPROM_OFFSET);
+        RX_STATE = 1;
+        GREEN_LED = 0;
+        RED_LED = 0;
+        uart_putstr( "new mode: controller\n\r" );
+    }
 }
 
 void cmd_clear()
 {
     uint16_t i;
+
+    if( dmx_mode != CONTROLLER_MODE )
+    {
+        uart_putstr( "error: not in controller mode\n\r" );
+        return;
+    }
 
     for( i = 1; i <= DMX_MAX; ++i )
         DMX_TX_DATA[i] = 0;
@@ -548,15 +578,51 @@ void cmd_get( uint8_t argc, char argv[MAX_ARG_COUNT][MAX_WORD_SIZE] )
 
 void cmd_on()
 {
-    if(MODE == 'c')
+    if( dmx_mode != CONTROLLER_MODE )
+    {
+        uart_putstr( "error: not in controller mode\n\r" );
+        return;
+    }
+
+    uart_putstr( "current dmx transmit state: " );
+
+    if( dmx_transmit_state )
+    {
+        uart_putstr( "on\n\r" );
+        uart_putstr( "no action taken\n\r" );
+    }
+    else
+    {
+        uart_putstr( "off\n\r" );
+        dmx_transmit_state = true;
         init_dmx_tx();
+        uart_putstr( "new dmx transmit state: on\n\r" );
+    }
 }
 
 void cmd_off()
 {
-    if(MODE == 'c')
+    if( dmx_mode != CONTROLLER_MODE )
+    {
+        uart_putstr( "error: not in controller mode\n\r" );
+        return;
+    }
+
+    uart_putstr( "current dmx transmit state: " );
+
+    if( !dmx_transmit_state )
+    {
+        uart_putstr( "off\n\r" );
+        uart_putstr( "no action taken\n\r" );
+    }
+    else
+    {
+        uart_putstr( "on\n\r" );
+        dmx_transmit_state = false;
         UART1_CTL_R &= ~UART_CTL_UARTEN;
-    RED_LED = 0;
+        RED_LED = 0;
+        uart_putstr( "new dmx transmit state: off\n\r" );
+    }
 }
 
 void cmd_max( uint8_t argc, char argv[MAX_ARG_COUNT][MAX_WORD_SIZE] )
