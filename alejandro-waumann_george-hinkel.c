@@ -73,6 +73,8 @@ void init_dmx_rx(void);
 void recover_from_reset(void);
 void save_mode_and_addr(void);
 
+char *sprint_int(uint32_t num);
+
 /*
  * GLOBAL VARIABLES
  */
@@ -301,6 +303,23 @@ char uart_getc()
     while( UART0_FR_R & UART_FR_RXFE );
 
     return UART0_DR_R & 0xFF;
+}
+
+char *sprint_int(uint32_t num)
+{
+    uint32_t temp = num;
+    static char numstr[6] = {0,0,0,0,0,'\0'};
+    int i;
+    for(i=4;i>=0;i--)
+    {
+        numstr[i] = (temp%10)+(0x30);
+        temp = temp/10;
+        if( (i<4) && (numstr[i]==0x30) )
+        {
+            numstr[i] = 0x20;
+        }
+    }
+    return numstr;
 }
 
 /*
