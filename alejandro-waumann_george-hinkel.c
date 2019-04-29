@@ -17,6 +17,9 @@
 #define MAX_WORD_SIZE   11
 #define MAX_ARG_COUNT   3
 
+#define CONTROLLER_MODE 'c'
+#define DEVICE_MODE 'd'
+
 //bit masks
 #define GREEN_LED_MASK 8
 #define RED_LED_MASK 2
@@ -445,13 +448,13 @@ void run_cmd( uint8_t argc, char argv[MAX_ARG_COUNT][MAX_WORD_SIZE] )
 
 void cmd_device()
 {
-    cmd_off();
+    //cmd_off();
     MODE = 'd';
     save_to_eeprom(MODE,MODE_EEPROM_BLOCK,MODE_EEPROM_OFFSET);
     init_dmx_rx();
     GREEN_LED = 0;
     RED_LED = 0;
-    RX_STATE = 0;
+    //RX_STATE = 0;
 }
 
 void cmd_controller()
@@ -476,7 +479,7 @@ void cmd_set( uint8_t argc, char argv[MAX_ARG_COUNT][MAX_WORD_SIZE] )
     uint32_t address;
     uint32_t value;
 
-    if( dmx_mode != CONTROLLER_MODE )
+    if( MODE != CONTROLLER_MODE )
     {
         uart_putstr( "error: not in controller mode\n\r" );
         return;
@@ -505,7 +508,7 @@ void cmd_set( uint8_t argc, char argv[MAX_ARG_COUNT][MAX_WORD_SIZE] )
         return;
     }
 
-    dmx_data[address] = (uint8_t)value;
+    DMX_TX_DATA[address] = (uint8_t)value;
 }
 
 void cmd_get( uint8_t argc, char argv[MAX_ARG_COUNT][MAX_WORD_SIZE] )
@@ -513,7 +516,7 @@ void cmd_get( uint8_t argc, char argv[MAX_ARG_COUNT][MAX_WORD_SIZE] )
     uint32_t address;
     uint8_t  value;
 
-    if( dmx_mode != CONTROLLER_MODE )
+    if( MODE != CONTROLLER_MODE )
     {
         uart_putstr( "error: not in controller mode\n\r" );
         return;
@@ -535,11 +538,11 @@ void cmd_get( uint8_t argc, char argv[MAX_ARG_COUNT][MAX_WORD_SIZE] )
         return;
     }
 
-    value = dmx_data[address];
+    value = DMX_TX_DATA[address];
     uart_putstr( "value at address " );
-    // print address
+    uart_putstr(sprint_int(address));
     uart_putstr( ": " );
-    // print value
+    uart_putstr(sprint_int(value));
     uart_putstr( "\n\r" );
 }
 
@@ -560,7 +563,7 @@ void cmd_max( uint8_t argc, char argv[MAX_ARG_COUNT][MAX_WORD_SIZE] )
 {
     uint32_t max_addr;
 
-    if( dmx_mode != CONTROLLER_MODE )
+    if( MODE != CONTROLLER_MODE )
     {
         uart_putstr( "error: not in controller mode\n\r" );
         return;
@@ -585,7 +588,7 @@ void cmd_max( uint8_t argc, char argv[MAX_ARG_COUNT][MAX_WORD_SIZE] )
     uart_putstr( "current max address: " );
     // print current max
     uart_putstr( "\n\r" );
-    dmx_max_addr = (uint16_t)max_addr;
+    DMX_MAX = (uint16_t)max_addr;
     uart_putstr( "new max address: " );
     // print new max
     uart_putstr( "\n\r" );
@@ -714,7 +717,6 @@ void Uart1ISR(void) //TODO: add handling for UART error conditions
         while(!(UART1_FR_R & UART_FR_RXFE))                 // while RX fifo not empty
         {
             DMX_RX_BUFF[DMX_RX_INDEX++] = UART1_DR_R & 0xFF;  // fill the receive buffer
-
         }
         DMX_RX_DATA = DMX_RX_BUFF[ADDR];            // update the dmx data at listening address
         RX_STATE = 0;
