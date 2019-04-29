@@ -669,6 +669,40 @@ void cmd_max( uint8_t argc, char argv[MAX_ARG_COUNT][MAX_WORD_SIZE] )
 
 void cmd_address( uint8_t argc, char argv[MAX_ARG_COUNT][MAX_WORD_SIZE] )
 {
+
+    uint16_t addr;
+
+    if( MODE != DEVICE_MODE )
+    {
+        uart_putstr( "error: not in device mode\n\r" );
+        return;
+    }
+
+    if( argc != 2 )
+    {
+        uart_putstr( "error: expected 2 arguments, got " );
+        uart_putc( argc + 48 );
+        uart_putstr( "\n\r" );
+        return;
+    }
+
+    addr = argv[1];
+
+    uart_putstr( "current device address: " );
+    uart_putstr( sprint_int( ADDR ) );
+    uart_putstr( "\n\r" );
+
+    if( addr == ADDR )
+    {
+        uart_putstr( "no action taken\n\r" );
+    }
+    else
+    {
+        ADDR = addr;
+        uart_putstr( "new device address: " );
+        uart_putstr( sprint_int( ADDR ) );
+        uart_putstr( "\n\r" );
+    }
 }
 
 void wait_us( uint32_t us )
