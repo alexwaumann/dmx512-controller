@@ -23,6 +23,7 @@
 //bit masks
 #define GREEN_LED_MASK 8
 #define RED_LED_MASK 2
+#define BLUE_LED_MASK  4
 #define PC5_MASK 32
 
 //Bit-Banded defines
