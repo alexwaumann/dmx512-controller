@@ -791,6 +791,10 @@ void Uart1ISR(void) //TODO: add handling for UART error conditions
             DMX_RX_BUFF[DMX_RX_INDEX++] = UART1_DR_R & 0xFF;  // fill the receive buffer
         }
         DMX_RX_DATA = DMX_RX_BUFF[ADDR];            // update the dmx data at listening address
+        if(DMX_RX_DATA)
+            BLUE_LED = 1;
+        else
+            BLUE_LED = 0;
         RX_STATE = 0;
         TIMER3_CTL_R |= TIMER_CTL_TAEN;                     // turn on timer 3
         DMX_RX_INDEX = 0;                                   // reset RX index b/c dmx protocol restarting
