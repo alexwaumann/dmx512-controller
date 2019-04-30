@@ -103,9 +103,9 @@ int main( void )
     recover_from_reset();
 
     /*while(true){
-        uart_putui(dmx_receive_data[0]);
+        uart_putui(dmx_receive_data[1]);
         uart_putstr("\n\r");
-        wait_us(100);
+        wait_us(1000000);
     }*//**/
     while( true )
     {
@@ -220,13 +220,13 @@ void init_uart_dmx( void )
     //GPIO_PORTC_PCTL_R  &= ~( GPIO_PCTL_PC4_M | GPIO_PCTL_PC5_M );
     GPIO_PORTC_PCTL_R  |= ( GPIO_PCTL_PC4_U1RX | GPIO_PCTL_PC5_U1TX );
 
-    UART1_CTL_R &= ~UART_CTL_UARTEN;
+    UART1_CTL_R = 0;
 
     // configure for 250,000 baud
     UART1_IBRD_R = 10;
     UART1_FBRD_R = 0;
 
-    UART1_LCRH_R |= UART_LCRH_WLEN_8 | UART_LCRH_FEN | UART_LCRH_STP2;
+    UART1_LCRH_R  = UART_LCRH_WLEN_8 | UART_LCRH_FEN | UART_LCRH_STP2;
     UART1_CC_R    = UART_CC_CS_SYSCLK;
 
     //UART1_CTL_R  |= UART_CTL_UARTEN | UART_CTL_RXE | UART_CTL_TXE;
@@ -497,6 +497,7 @@ void cmd_device()
     {
         uart_putstr( "device\n\r" );
         uart_putstr( "no action taken\n\r" );
+        set_dmx_mode( DEVICE_MODE );
     }
     else
     {
@@ -520,6 +521,7 @@ void cmd_controller()
     {
         uart_putstr( "controller\n\r" );
         uart_putstr( "no action taken\n\r" );
+        set_dmx_mode( CONTROLLER_MODE );
     }
     else
     {
@@ -805,23 +807,17 @@ void dmx_prime( void )
 
 void dmx_receive( void )
 {
-    uart_putstr("\n\dmx receive\n\r");
-    UART1_CTL_R &= ~UART_CTL_UARTEN;
+    //uart_putstr("\n\rdmx receive\n\r");
+    UART1_CTL_R = 0;
 
     while(UART1_FR_R & UART_FR_BUSY);
 
     UART1_LCRH_R &= ~UART_LCRH_FEN;
     UART1_LCRH_R |= UART_LCRH_FEN;
 
-    UART1_CTL_R &= ~UART_CTL_TXE;
-    UART1_CTL_R |= UART_CTL_RXE;
-
     // turn on interrupts for rx and off for tx
-    UART1_IM_R |= UART_IM_RXIM;
-    UART1_IM_R |= UART_IM_BEIM;
-    UART1_IM_R &= ~UART_IM_TXIM;
-
-    UART1_CTL_R |= UART_CTL_UARTEN;
+    UART1_IM_R = UART_IM_RXIM | UART_IM_BEIM;
+    UART1_CTL_R = UART_CTL_RXE | UART_CTL_UARTEN;
 }
 
 void set_dmx_mode( uint8_t mode )
@@ -850,7 +846,7 @@ void recover_from_reset( void )
         dmx_mode = CONTROLLER_MODE;
     }
     set_dmx_mode( dmx_mode );
-
+    wait_us(10);
     dmx_current_addr = eeprom_read_addr();
     if( dmx_current_addr > 512 || dmx_current_addr == 0 )
     {
@@ -861,30 +857,46 @@ void recover_from_reset( void )
 
 uint8_t eeprom_read_mode( void )
 {
-    EEPROM_EEBLOCK_R &= ~EEPROM_EEBLOCK_BLOCK_M;
-    EEPROM_EEOFFSET_R &= ~EEPROM_EEOFFSET_OFFSET_M;
-    return (uint8_t)EEPROM_EERDWR_R;
+    EEPROM_EEBLOCK_R = 0;
+    while(EEPROM_EEDONE_R & EEPROM_EEDONE_WORKING);
+    EEPROM_EEOFFSET_R = 0;
+    while(EEPROM_EEDONE_R & EEPROM_EEDONE_WORKING);
+    uint8_t temp = (uint8_t)EEPROM_EERDWR_R;
+    while(EEPROM_EEDONE_R & EEPROM_EEDONE_WORKING);
+    return temp;
 }
 
 void eeprom_save_mode( uint8_t mode )
 {
-    dmx_mode = eeprom_read_mode();
     dmx_mode = mode;
+    EEPROM_EEBLOCK_R = 0;
+    while(EEPROM_EEDONE_R & EEPROM_EEDONE_WORKING);
+    EEPROM_EEOFFSET_R = 0;
+    while(EEPROM_EEDONE_R & EEPROM_EEDONE_WORKING);
     EEPROM_EERDWR_R = (uint32_t)dmx_mode;
+    while(EEPROM_EEDONE_R & EEPROM_EEDONE_WORKING);
 }
 
 uint16_t eeprom_read_addr( void )
 {
-    EEPROM_EEBLOCK_R &= ~EEPROM_EEBLOCK_BLOCK_M;
-    EEPROM_EEOFFSET_R &= (~EEPROM_EEOFFSET_OFFSET_M | 0x1);
-    return (uint16_t)EEPROM_EERDWR_R & 0x3FF;
+    EEPROM_EEBLOCK_R = 1;
+    while(EEPROM_EEDONE_R & EEPROM_EEDONE_WORKING);
+    EEPROM_EEOFFSET_R = 0;
+    while(EEPROM_EEDONE_R & EEPROM_EEDONE_WORKING);
+    uint16_t temp = (uint16_t)EEPROM_EERDWR_R & 0x3FF;
+    while(EEPROM_EEDONE_R & EEPROM_EEDONE_WORKING);
+    return temp;
 }
 
 void eeprom_save_addr( uint16_t addr )
 {
-    dmx_current_addr = eeprom_read_addr();
     dmx_current_addr = addr;
+    EEPROM_EEBLOCK_R = 1;
+    while(EEPROM_EEDONE_R & EEPROM_EEDONE_WORKING);
+    EEPROM_EEOFFSET_R = 0;
+    while(EEPROM_EEDONE_R & EEPROM_EEDONE_WORKING);
     EEPROM_EERDWR_R = (uint32_t)dmx_current_addr;
+    while(EEPROM_EEDONE_R & EEPROM_EEDONE_WORKING);
 }
 
 void wait_us( uint32_t us )
@@ -903,10 +915,9 @@ void wait_us( uint32_t us )
 
 void Uart1ISR( void )
 {
-    uart_putstr( "uart1isr\n\r" );
+
     if( UART1_MIS_R & UART_MIS_TXMIS )
     {
-        uart_putstr( "tx\n\r" );
         while( !(UART1_FR_R & UART_FR_TXFF) )
         {
             // send data
@@ -928,14 +939,23 @@ void Uart1ISR( void )
 
         UART1_ICR_R |= UART_ICR_TXIC;
     }
-
-    if(UART1_MIS_R & UART_MIS_RXMIS)
+    else if( (UART1_MIS_R & UART_MIS_BEMIS) )
     {
-
-        //if( !UART1_DR_R )
-        //{
-        //    uint8_t value;
-        //}
+        while( !(UART1_FR_R & UART_FR_RXFE) )
+            dmx_receive_data[dmx_receive_index++] = UART1_DR_R & 0xFF;
+        dmx_value = dmx_receive_data[dmx_current_addr];
+        if( dmx_value )
+            BLUE_LED = 1;
+        else
+            BLUE_LED = 0;
+        dmx_receive_index = 0;
+        rx_state = false;
+        TIMER3_CTL_R &= ~TIMER_CTL_TAEN;
+        TIMER3_TAILR_R = 80000000;
+        TIMER3_CTL_R |= TIMER_CTL_TAEN;
+    }
+    else if(UART1_MIS_R & UART_MIS_RXMIS)
+    {
         rx_state = true;
         GREEN_LED = 1;
         while( !(UART1_FR_R & UART_FR_RXFE) )
@@ -944,31 +964,8 @@ void Uart1ISR( void )
             if(dmx_receive_data[0]==0)
                 dmx_receive_index++;
         }
-        //GREEN_LED = 0;
-        uart_putstr("rxfe\n\r");
-        UART1_ICR_R |= UART_ICR_RXIC;
     }
-
-    if( (UART1_MIS_R & UART_MIS_BEMIS) )
-    {
-        uart_putstr( "brk\n\r" );
-        while( !(UART1_FR_R & UART_FR_RXFE) )
-            dmx_receive_data[dmx_receive_index++] = UART1_DR_R & 0xFF;
-
-        dmx_value = dmx_receive_data[dmx_current_addr];
-
-        if( dmx_value )
-            BLUE_LED = 1;
-        else
-            BLUE_LED = 0;
-
-        dmx_receive_index = 0;
-        rx_state = false;
-        GREEN_LED = 0;
-        TIMER3_CTL_R |= TIMER_CTL_TAEN;
-
-        UART1_ICR_R |= UART_ICR_BEIC;
-    }
+    UART1_ICR_R = UART_ICR_RXIC | UART_ICR_BEIC | UART_ICR_TXIC;
 }
 
 void Timer1ISR( void )
