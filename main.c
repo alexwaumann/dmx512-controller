@@ -7,6 +7,8 @@
 
 #include "tm4c123gh6pm.h"
 
+#define CLSCR "\033[2J\033[1;1H"
+
 #define MAX_CMD_SIZE    20
 #define MAX_WORD_SIZE   11
 #define MAX_ARG_COUNT   3
@@ -101,12 +103,6 @@ int main( void )
 {
     init_hw();
     recover_from_reset();
-
-    /*while(true){
-        uart_putui(dmx_receive_data[1]);
-        uart_putstr("\n\r");
-        wait_us(1000000);
-    }*//**/
     while( true )
     {
         char    cmd_str[MAX_CMD_SIZE] = {'\0'};
@@ -840,19 +836,27 @@ void set_dmx_mode( uint8_t mode )
 
 void recover_from_reset( void )
 {
-    //uart_putstr("\n\rrecover from reset\n\r");
     dmx_mode = eeprom_read_mode();
-    if( dmx_mode != CONTROLLER_MODE && dmx_mode != DEVICE_MODE ){
+    if( dmx_mode != CONTROLLER_MODE && dmx_mode != DEVICE_MODE )
         dmx_mode = CONTROLLER_MODE;
-    }
     set_dmx_mode( dmx_mode );
-    wait_us(10);
     dmx_current_addr = eeprom_read_addr();
     if( dmx_current_addr > 512 || dmx_current_addr == 0 )
     {
         eeprom_save_addr( 1 );
         dmx_current_addr = 1;
     }
+    uart_putstr(CLSCR);
+    uart_putstr("   Mode: ");
+    if(dmx_mode == CONTROLLER_MODE)
+        uart_putstr("Controller\n\r");
+    else if(dmx_mode == DEVICE_MODE)
+        uart_putstr("Device\n\r");
+    else
+        uart_putstr("Error\n\r");
+    uart_putstr("Address: ");
+    uart_putui(dmx_current_addr);
+    uart_putstr("\n\r");
 }
 
 uint8_t eeprom_read_mode( void )
