@@ -106,7 +106,7 @@ unsigned char DMX_RX_BUFF[513]={0}; //stores all received dmx data
 int main( void )
 {
     init_hw();
-    save_to_eeprom(ADDR,ADDR_EEPROM_BLOCK,ADDR_EEPROM_OFFSET);
+    //save_to_eeprom(ADDR,ADDR_EEPROM_BLOCK,ADDR_EEPROM_OFFSET);
     recover_from_reset();
     ADDR = ADDR%513;
     if(MODE == 'c')
@@ -466,12 +466,13 @@ void cmd_device()
     {
         uart_putstr( "controller\n\r" );
         //cmd_off();
+        UART1_CTL_R &= ~UART_CTL_UARTEN;
         MODE = 'd';
         save_to_eeprom(MODE,MODE_EEPROM_BLOCK,MODE_EEPROM_OFFSET);
         init_dmx_rx();
         GREEN_LED = 0;
         RED_LED = 0;
-        //RX_STATE = 0;
+        RX_STATE = 0;
         uart_putstr( "new mode: device\n\r" );
     }
 }
@@ -699,6 +700,7 @@ void cmd_address( uint8_t argc, char argv[MAX_ARG_COUNT][MAX_WORD_SIZE] )
     else
     {
         ADDR = addr;
+        save_to_eeprom(ADDR,ADDR_EEPROM_BLOCK,ADDR_EEPROM_OFFSET);
         uart_putstr( "new device address: " );
         uart_putstr( sprint_int( ADDR ) );
         uart_putstr( "\n\r" );
@@ -754,6 +756,7 @@ void init_dmx_rx(void)
     UART1_CTL_R |= UART_CTL_UARTEN              // start UART1
                 |  UART_CTL_RXE;                // enable UART1 Receiving
     DMX_DE = 0;                                 // drive DMX_DE high to disable transmission
+    uart_putc('i');
 }
 
 //function that loads MODE and ADDR vars from EEPROM if they were saved
@@ -763,6 +766,7 @@ void recover_from_reset(void)
     if(EEPROM_STAT)                           // if the EEPROM has been saved to
     {
         MODE = read_from_eeprom(MODE_EEPROM_BLOCK,MODE_EEPROM_OFFSET) & 0xFF;   // read the MODE from the block and offset for MODE
+        wait_us(1);
         ADDR = read_from_eeprom(ADDR_EEPROM_BLOCK,ADDR_EEPROM_OFFSET) & 0x2FF;   // read the ADDR from the block and offset for ADDR
     }
 }
@@ -808,6 +812,7 @@ void Uart1ISR(void) //TODO: add handling for UART error conditions
     //RECEIVE FIFO LEVEL INTERRUPT -> empty RX fifo
     else if(UART1_MIS_R & UART_MIS_RXMIS)
     {
+        uart_putc('r');
         GREEN_LED = 1;                                      // keep Green LED solid on while receiving regularly
         RX_STATE = 1;
         while(!(UART1_FR_R & UART_FR_RXFE) && (DMX_RX_INDEX <= 513))                 // while RX fifo not empty
@@ -822,6 +827,7 @@ void Uart1ISR(void) //TODO: add handling for UART error conditions
     //BREAK ERROR INTERRUPT -> empty RX fifo, clear receive buffer, update dmx data at listening address
     if(UART1_MIS_R & UART_MIS_BEMIS)
     {
+        uart_putc('b');
         while(!(UART1_FR_R & UART_FR_RXFE))                 // while RX fifo not empty
         {
             DMX_RX_BUFF[DMX_RX_INDEX++] = UART1_DR_R & 0xFF;  // fill the receive buffer
@@ -835,6 +841,7 @@ void Uart1ISR(void) //TODO: add handling for UART error conditions
         TIMER3_CTL_R |= TIMER_CTL_TAEN;                     // turn on timer 3
         DMX_RX_INDEX = 0;                                   // reset RX index b/c dmx protocol restarting
         UART1_ICR_R |= UART_ICR_BEIC;                       // clear the BE interrupt flag
+        UART1_ECR_R |= 0xFF;
     }
 }
 
