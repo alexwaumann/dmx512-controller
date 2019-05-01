@@ -424,6 +424,7 @@ uint8_t parse_cmd( char cmd[MAX_CMD_SIZE], char argv[MAX_ARG_COUNT][MAX_WORD_SIZ
 }
 
 /*
+ * switch over commands and call designated cmd function
  */
 void run_cmd( uint8_t argc, char argv[MAX_ARG_COUNT][MAX_WORD_SIZE] )
 {
@@ -774,6 +775,9 @@ void cmd_address( uint8_t argc, char argv[MAX_ARG_COUNT][MAX_WORD_SIZE] )
     }
 }
 
+/*
+ * set up UART interrupts for transmitting
+ */
 void dmx_transmit( void )
 {
     UART1_CTL_R = 0;
@@ -787,6 +791,9 @@ void dmx_transmit( void )
     UART1_IM_R = UART_IM_TXIM;
 }
 
+/*
+ * "prime the pump" for dmx protocol, reset everything for starting transmission again
+ */
 void dmx_prime( void )
 {
     RED_LED = 0;
@@ -802,6 +809,9 @@ void dmx_prime( void )
         TIMER1_CTL_R |= TIMER_CTL_TAEN;
 }
 
+/*
+ * Set up UART interrupts for receiving and enable RX
+ */
 void dmx_receive( void )
 {
     uart_putstr("\n\rdmx receive\n\r");
@@ -818,9 +828,12 @@ void dmx_receive( void )
     TIMER3_CTL_R |= TIMER_CTL_TAEN;
 }
 
+/*
+ * save new mode to global, save to EEPROM
+ * perform mode switching operations to ensure proper function of LEDs and DMX UART
+ */
 void set_dmx_mode( uint8_t mode )
 {
-    //uart_putstr("\n\rset dmx mode\n\r");
     eeprom_save_mode( mode );
 
     if( dmx_mode == CONTROLLER_MODE )
@@ -839,6 +852,11 @@ void set_dmx_mode( uint8_t mode )
     }
 }
 
+/*
+ * read the EEPROM for dmx_current_addr and dmx_mode
+ * revert to defaults if invalid
+ * print opening screen the mode and addr displayed
+ */
 void recover_from_reset( void )
 {
     dmx_mode = eeprom_read_mode();
@@ -864,6 +882,9 @@ void recover_from_reset( void )
     uart_putstr("\n\r");
 }
 
+/*
+ * read EEPROM where dmx_mode should be stored then return
+ */
 uint8_t eeprom_read_mode( void )
 {
     EEPROM_EEBLOCK_R = 0;
@@ -875,6 +896,9 @@ uint8_t eeprom_read_mode( void )
     return temp;
 }
 
+/*
+ * update dmx_mode to mode, then save to EEPROM
+ */
 void eeprom_save_mode( uint8_t mode )
 {
     dmx_mode = mode;
@@ -886,6 +910,9 @@ void eeprom_save_mode( uint8_t mode )
     while(EEPROM_EEDONE_R & EEPROM_EEDONE_WORKING);
 }
 
+/*
+ * read EEPROM where dmx_current_addr should be stored then return
+ */
 uint16_t eeprom_read_addr( void )
 {
     EEPROM_EEBLOCK_R = 1;
@@ -897,6 +924,9 @@ uint16_t eeprom_read_addr( void )
     return temp;
 }
 
+/*
+ * update dmx_current_addr to addr, then save to EEPROM
+ */
 void eeprom_save_addr( uint16_t addr )
 {
     dmx_current_addr = addr;
@@ -922,6 +952,13 @@ void wait_us( uint32_t us )
                                                 // 40 clocks/us + error
 }
 
+/*
+ * Uart1ISR
+ *
+ * If TX interrupt    -> fill TX fifo from buffer while checking for max, if max restart transmission and break
+ * If Break Interrupt -> empty RX fifo, discard break data, update at listening addr, restart break watch timer
+ * If RX interrupt    -> empty RX fifo, keep GREEN_LED on to indicate receiving
+ */
 void Uart1ISR( void )
 {
 
@@ -949,30 +986,42 @@ void Uart1ISR( void )
     }
     else if( UART1_MIS_R & UART_MIS_BEMIS )
     {
+        // empty the buffer in case it still has data, discard the break error byte
         uint16_t temp;
         while( !(UART1_FR_R & UART_FR_RXFE) )
         {
             temp = UART1_DR_R & 0xFFF;
             if( !(temp & 0x400) )
-                dmx_receive_data[dmx_receive_index++] = temp & 0xFF;
+            {
+                dmx_receive_data[dmx_receive_index] = temp & 0xFF;
+                if(dmx_receive_data[0]==0)
+                    dmx_receive_index++;
+            }
         }
 
-
+        // update the dmx_value and update the controlled device
         dmx_value = dmx_receive_data[dmx_current_addr];
         if( dmx_value )
             BLUE_LED = 1;
         else
             BLUE_LED = 0;
+
+        // reset receive index and set rx_state to false to trigger the led when break watch timer goes off
         dmx_receive_index = 0;
         rx_state = false;
+
+        // reset the break watching timer since a break has been received
         TIMER3_CTL_R &= ~TIMER_CTL_TAEN;
         TIMER3_TAILR_R = 80000000;
         TIMER3_CTL_R |= TIMER_CTL_TAEN;
     }
     else if( UART1_MIS_R & UART_MIS_RXMIS )
     {
+        // set rx_state to true and turn on GREEN_LED since receiving
         rx_state = true;
         GREEN_LED = 1;
+
+        // empty the receive fifo into the buffer, only fill buffer after start code received
         while( !(UART1_FR_R & UART_FR_RXFE) )
         {
             dmx_receive_data[dmx_receive_index] = (UART1_DR_R & 0xFF);
@@ -983,7 +1032,12 @@ void Uart1ISR( void )
     UART1_ICR_R = UART_ICR_RXIC | UART_ICR_BEIC | UART_ICR_TXIC;
 }
 
-// Manage the priming the pump creating the break, MAB, and after enables the TX UART
+/*
+ * Timer1ISR
+ *
+ * if DMX in Break state -> drive TX high and advance to Mark After Break state
+ * if DMX in MAB state   -> turn over GPIO control to UART, enable UART and TX, and fill TX fifo from buffer
+ */
 void Timer1ISR( void )
 {
     if( dmx_transmit_state == DMX_STATE_BREAK )
@@ -1030,14 +1084,23 @@ void Timer1ISR( void )
     TIMER1_ICR_R |= TIMER_ICR_TATOCINT;
 }
 
-// Turn off GREEN_LED after 250 ms to complete flash
+/*
+ * Timer2ISR
+ *
+ * Turn off Green LED on trigger to complete a 250 ms flash
+ */
 Timer2ISR( void )
 {
     TIMER2_ICR_R |= TIMER_ICR_TATOCINT;
     GREEN_LED = 0;
 }
 
-//
+/*
+ * Timer3ISR
+ *
+ * if rx_state == true, stop flashing GREEN_LED and reset period to 2s
+ * if rx_state == false, start toggling GREEN_LED every 1s
+ */
 Timer3ISR( void )
 {
     if(rx_state){
