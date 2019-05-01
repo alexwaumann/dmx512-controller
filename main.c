@@ -507,7 +507,7 @@ void cmd_device()
  * change into controller mode
  * save to eeprom
  */
-void cmd_controller()
+void cmd_controller( void )
 {
     //UART1_CTL_R &= ~UART_CTL_UARTEN;
     dmx_transmit_on = false;
@@ -530,7 +530,7 @@ void cmd_controller()
 /*
  * set all dmx data to 0
  */
-void cmd_clear()
+void cmd_clear( void )
 {
     uint16_t i;
 
@@ -853,9 +853,9 @@ void recover_from_reset( void )
     }
     uart_putstr(CLSCR);
     uart_putstr("   Mode: ");
-    if(dmx_mode == CONTROLLER_MODE)
+    if( dmx_mode == CONTROLLER_MODE )
         uart_putstr("Controller\n\r");
-    else if(dmx_mode == DEVICE_MODE)
+    else if( dmx_mode == DEVICE_MODE )
         uart_putstr("Device\n\r");
     else
         uart_putstr("Error\n\r");
@@ -947,10 +947,17 @@ void Uart1ISR( void )
 
         UART1_ICR_R |= UART_ICR_TXIC;
     }
-    else if( (UART1_MIS_R & UART_MIS_BEMIS) )
+    else if( UART1_MIS_R & UART_MIS_BEMIS )
     {
+        uint16_t temp;
         while( !(UART1_FR_R & UART_FR_RXFE) )
-            dmx_receive_data[dmx_receive_index++] = UART1_DR_R & 0xFF;
+        {
+            temp = UART1_DR_R & 0xFFF;
+            if( !(temp & 0x400) )
+                dmx_receive_data[dmx_receive_index++] = temp & 0xFF;
+        }
+
+
         dmx_value = dmx_receive_data[dmx_current_addr];
         if( dmx_value )
             BLUE_LED = 1;
@@ -962,7 +969,7 @@ void Uart1ISR( void )
         TIMER3_TAILR_R = 80000000;
         TIMER3_CTL_R |= TIMER_CTL_TAEN;
     }
-    else if(UART1_MIS_R & UART_MIS_RXMIS)
+    else if( UART1_MIS_R & UART_MIS_RXMIS )
     {
         rx_state = true;
         GREEN_LED = 1;
@@ -976,6 +983,7 @@ void Uart1ISR( void )
     UART1_ICR_R = UART_ICR_RXIC | UART_ICR_BEIC | UART_ICR_TXIC;
 }
 
+// Manage the priming the pump creating the break, MAB, and after enables the TX UART
 void Timer1ISR( void )
 {
     if( dmx_transmit_state == DMX_STATE_BREAK )
@@ -1022,13 +1030,15 @@ void Timer1ISR( void )
     TIMER1_ICR_R |= TIMER_ICR_TATOCINT;
 }
 
-Timer2ISR()
+// Turn off GREEN_LED after 250 ms to complete flash
+Timer2ISR( void )
 {
     TIMER2_ICR_R |= TIMER_ICR_TATOCINT;
     GREEN_LED = 0;
 }
 
-Timer3ISR()
+//
+Timer3ISR( void )
 {
     if(rx_state){
         TIMER3_TAILR_R = 80000000;      // set TIMER3 ILR to appropriate value for 2s = 80,000,000
