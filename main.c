@@ -766,6 +766,11 @@ void cmd_address( uint8_t argc, char argv[MAX_ARG_COUNT][MAX_WORD_SIZE] )
         uart_putstr( "new device address: " );
         uart_putui( dmx_current_addr );
         uart_putstr( "\n\r" );
+        dmx_value = dmx_receive_data[dmx_current_addr];
+        if(dmx_value)
+            BLUE_LED = 1;
+        else
+            BLUE_LED = 0;
     }
 }
 
