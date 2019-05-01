@@ -188,19 +188,19 @@ void init_uart_coms( void )
     GPIO_PORTA_AFSEL_R |= 0x3;
     GPIO_PORTA_DEN_R   |= 0x3;
     GPIO_PORTA_DIR_R   |= 0x2;
-    GPIO_PORTA_PCTL_R  &= ~( GPIO_PCTL_PA0_M | GPIO_PCTL_PA1_M );
+    //GPIO_PORTA_PCTL_R  &= ~( GPIO_PCTL_PA0_M | GPIO_PCTL_PA1_M );
     GPIO_PORTA_PCTL_R  |= ( GPIO_PCTL_PA0_U0RX | GPIO_PCTL_PA1_U0TX );
 
-    UART0_CTL_R &= ~UART_CTL_UARTEN;
+    UART0_CTL_R = 0;
 
     // configure for 9600 baud
     UART0_IBRD_R = 260;
     UART0_FBRD_R = 27;
 
-    UART0_LCRH_R |= UART_LCRH_WLEN_8 | UART_LCRH_FEN;
+    UART0_LCRH_R  = UART_LCRH_WLEN_8 | UART_LCRH_FEN;
     UART0_CC_R    = UART_CC_CS_SYSCLK;
 
-    UART0_CTL_R |= UART_CTL_UARTEN | UART_CTL_RXE | UART_CTL_TXE;
+    UART0_CTL_R = UART_CTL_UARTEN | UART_CTL_RXE | UART_CTL_TXE;
 }
 
 void init_uart_dmx( void )
@@ -234,7 +234,7 @@ void init_timer_dmx( void )
 {
     SYSCTL_RCGCTIMER_R |= SYSCTL_RCGCTIMER_R1;
 
-    TIMER1_CTL_R &= ~TIMER_CTL_TAEN;
+    TIMER1_CTL_R = 0;
 
     // 32-bit one-shot timer
     TIMER1_CFG_R = TIMER_CFG_32_BIT_TIMER;
@@ -248,7 +248,7 @@ void init_timer_dmx( void )
 void init_timer_led_blink( void )
 {
     SYSCTL_RCGCTIMER_R |= SYSCTL_RCGCTIMER_R2;  // turn on timer 2
-    TIMER2_CTL_R &= ~TIMER_CTL_TAEN;            // turn off timer before configuring
+    TIMER2_CTL_R = 0;            // turn off timer before configuring
     TIMER2_CFG_R = TIMER_CFG_32_BIT_TIMER;      // configure as 32-bit timer (concatenated)
     TIMER2_TAMR_R = TIMER_TAMR_TAMR_1_SHOT;     // configure in periodic mode (count down)
     TIMER2_IMR_R = TIMER_IMR_TATOIM;            // turn on timer2 interrupt
@@ -256,7 +256,7 @@ void init_timer_led_blink( void )
     NVIC_EN0_R |= 1 << (INT_TIMER2A - 16);      // turn on interrupt 39 (TIMER2A)
 
     SYSCTL_RCGCTIMER_R |= SYSCTL_RCGCTIMER_R3;  // turn on timer 3
-    TIMER3_CTL_R &= ~TIMER_CTL_TAEN;            // turn off timer before configuring
+    TIMER3_CTL_R = 0;            // turn off timer before configuring
     TIMER3_CFG_R = TIMER_CFG_32_BIT_TIMER;      // configure as 32-bit timer (concatenated)
     TIMER3_TAMR_R = TIMER_TAMR_TAMR_1_SHOT;     // configure in one-shot mode (count down)
     TIMER3_IMR_R = TIMER_IMR_TATOIM;            // turn on timer3 interrupt
@@ -485,7 +485,7 @@ void cmd_help()
  */
 void cmd_device()
 {
-    UART1_CTL_R &= ~UART_CTL_UARTEN;
+    //UART1_CTL_R &= ~UART_CTL_UARTEN;
     dmx_transmit_on = false;
     uart_putstr( "current mode: " );
 
@@ -509,7 +509,7 @@ void cmd_device()
  */
 void cmd_controller()
 {
-    UART1_CTL_R &= ~UART_CTL_UARTEN;
+    //UART1_CTL_R &= ~UART_CTL_UARTEN;
     dmx_transmit_on = false;
     uart_putstr( "current mode: " );
 
@@ -714,11 +714,11 @@ void cmd_max( uint8_t argc, char argv[MAX_ARG_COUNT][MAX_WORD_SIZE] )
     }
 
     uart_putstr( "current max address: " );
-    // print current max
+    uart_putui(dmx_max_addr);
     uart_putstr( "\n\r" );
     dmx_max_addr = (uint16_t)max_addr;
     uart_putstr( "new max address: " );
-    // print new max
+    uart_putui(dmx_max_addr);
     uart_putstr( "\n\r" );
 }
 
@@ -771,19 +771,15 @@ void cmd_address( uint8_t argc, char argv[MAX_ARG_COUNT][MAX_WORD_SIZE] )
 
 void dmx_transmit( void )
 {
-    UART1_CTL_R &= ~UART_CTL_UARTEN;
+    UART1_CTL_R = 0;
 
     while(UART1_FR_R & UART_FR_BUSY);
 
     UART1_LCRH_R &= ~UART_LCRH_FEN;
     UART1_LCRH_R |= UART_LCRH_FEN;
 
-    UART1_CTL_R &= ~UART_CTL_RXE;
     // turn on interrupts for tx and off for rx
-    UART1_IM_R  |= UART_IM_TXIM;
-    UART1_IM_R  &= ~UART_IM_RXIM;
-    UART1_IM_R  &= ~UART_IM_BEIM;
-
+    UART1_IM_R = UART_IM_TXIM;
 }
 
 void dmx_prime( void )
@@ -803,7 +799,7 @@ void dmx_prime( void )
 
 void dmx_receive( void )
 {
-    //uart_putstr("\n\rdmx receive\n\r");
+    uart_putstr("\n\rdmx receive\n\r");
     UART1_CTL_R = 0;
 
     while(UART1_FR_R & UART_FR_BUSY);
@@ -814,6 +810,7 @@ void dmx_receive( void )
     // turn on interrupts for rx and off for tx
     UART1_IM_R = UART_IM_RXIM | UART_IM_BEIM;
     UART1_CTL_R = UART_CTL_RXE | UART_CTL_UARTEN;
+    TIMER3_CTL_R |= TIMER_CTL_TAEN;
 }
 
 void set_dmx_mode( uint8_t mode )
@@ -824,10 +821,13 @@ void set_dmx_mode( uint8_t mode )
     if( dmx_mode == CONTROLLER_MODE )
     {
         DMX_DE = 1;
+        rx_state = true;
+
         dmx_transmit();
     }
     else
     {
+        rx_state = false;
         DMX_DE = 0;
         RED_LED = 0;
         dmx_receive();
@@ -924,9 +924,6 @@ void Uart1ISR( void )
     {
         while( !(UART1_FR_R & UART_FR_TXFF) )
         {
-            // send data
-            UART1_DR_R = dmx_data[dmx_transmit_index++];
-
             // check if done
             if( dmx_transmit_index > dmx_max_addr )
             {
@@ -938,7 +935,9 @@ void Uart1ISR( void )
                 // start transmission again
                 dmx_prime();
                 return;
-            }
+            }else //send data
+                UART1_DR_R = dmx_data[dmx_transmit_index++];
+
         }
 
         UART1_ICR_R |= UART_ICR_TXIC;
@@ -1000,8 +999,20 @@ void Timer1ISR( void )
 
         UART1_CTL_R  |= UART_CTL_UARTEN | UART_CTL_TXE;
 
-        while( !(UART1_FR_R & UART_FR_TXFF) )
-            UART1_DR_R = dmx_data[dmx_transmit_index++];
+        while( !(UART1_FR_R & UART_FR_TXFF) ){
+
+            if( dmx_transmit_index > dmx_max_addr )
+            {
+                // wait until transmission complete
+                while( UART1_FR_R & UART_FR_BUSY );
+
+                TIMER1_ICR_R |= TIMER_ICR_TATOCINT;
+                // start transmission again
+                dmx_prime();
+                return;
+            }else
+                UART1_DR_R = dmx_data[dmx_transmit_index++];
+        }
     }
     TIMER1_ICR_R |= TIMER_ICR_TATOCINT;
 }
@@ -1016,6 +1027,7 @@ Timer3ISR()
 {
     if(rx_state){
         TIMER3_TAILR_R = 80000000;      // set TIMER3 ILR to appropriate value for 2s = 80,000,000
+        GREEN_LED = 0;
     }
     else
     {
