@@ -174,7 +174,7 @@ void init_eeprom(void)
  *
  * baud rate    9600
  * data frame   8-bit
- * fifa         enabled
+ * fifo         enabled
  * receive      enabled
  * transmit     enabled
  */
@@ -213,7 +213,6 @@ void init_uart_dmx( void )
     GPIO_PORTC_AFSEL_R |= 0x30;
     GPIO_PORTC_DEN_R   |= 0x70;
     GPIO_PORTC_DIR_R   |= 0x60;
-    //GPIO_PORTC_PCTL_R  &= ~( GPIO_PCTL_PC4_M | GPIO_PCTL_PC5_M );
     GPIO_PORTC_PCTL_R  |= ( GPIO_PCTL_PC4_U1RX | GPIO_PCTL_PC5_U1TX );
 
     UART1_CTL_R = 0;
@@ -224,8 +223,6 @@ void init_uart_dmx( void )
 
     UART1_LCRH_R  = UART_LCRH_WLEN_8 | UART_LCRH_FEN | UART_LCRH_STP2;
     UART1_CC_R    = UART_CC_CS_SYSCLK;
-
-    //UART1_CTL_R  |= UART_CTL_UARTEN | UART_CTL_RXE | UART_CTL_TXE;
 
     NVIC_EN0_R |= 1 << (INT_UART1 - 16);
 }
@@ -263,6 +260,7 @@ void init_timer_led_blink( void )
     TIMER3_TAILR_R = 80000000;                  // set TIMER3 ILR to appropriate value for 2s = 80,000,000
     NVIC_EN1_R |= 1 << (INT_TIMER3A - 48);      // turn on interrupt 51 (TIMER3A)
 }
+
 /*
  * print character to the serial console
  */
@@ -541,7 +539,7 @@ void cmd_clear( void )
         return;
     }
 
-    for( i = 1; i <= dmx_max_addr; ++i )
+    for( i = 1; i <= 512; ++i )
         dmx_data[i] = 0;
 }
 
